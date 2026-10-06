@@ -1,0 +1,6 @@
+{
+  "name": "Happy Mart Fin",
+  "description": "Siêu thị tài chính vui vẻ phong cách dopamine pastel: phương pháp 6 hũ đa tầng, quy đổi giờ làm việc, mood tracker, giỏ chờ đắn đo và khấu hao tài sản.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,190 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Thông tin tài khoản thành viên Happy Mart Fin của từng người dùng",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID của người dùng" },
+        "email": { "type": "string", "format": "email", "description": "Email tài khoản" },
+        "displayName": { "type": "string", "maxLength": 100, "description": "Tên hiển thị siêu thị" },
+        "avatar": { "type": "string", "maxLength": 10, "description": "Biểu tượng avatar" },
+        "memberId": { "type": "string", "maxLength": 32, "description": "Mã thẻ thành viên" },
+        "hourlyWage": { "type": "number", "description": "Mức lương theo giờ" },
+        "monthlyWorkHours": { "type": "number", "description": "Số giờ làm việc hàng tháng" },
+        "rolloverSavings": { "type": "number", "description": "Kế dư tháng trước mang sang" },
+        "currentStreakDays": { "type": "number", "description": "Chuỗi ngày ghi chép liên tục" },
+        "longestStreakDays": { "type": "number", "description": "Chuỗi ngày kỷ lục" },
+        "lastActiveDate": { "type": "string", "maxLength": 10, "description": "Ngày hoạt động gần nhất YYYY-MM-DD" },
+        "createdAt": { "type": "string", "description": "Thời điểm tạo tài khoản" }
+      },
+      "required": ["uid", "displayName", "hourlyWage"]
+    },
+    "Jar": {
+      "title": "Jar",
+      "description": "Cấu hình 6 hũ tài chính của người dùng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã hũ (nec, play, ltss, edu, ffa, give)" },
+        "name": { "type": "string", "maxLength": 100, "description": "Tên hũ" },
+        "code": { "type": "string", "maxLength": 20, "description": "Ký hiệu hũ" },
+        "limit": { "type": "number", "description": "Hạn mức chi tiêu" },
+        "colorBg": { "type": "string", "description": "Màu nền pastel" },
+        "colorBorder": { "type": "string", "description": "Màu viền" },
+        "colorText": { "type": "string", "description": "Màu chữ" },
+        "colorBar": { "type": "string", "description": "Gradient tiến độ" },
+        "icon": { "type": "string", "description": "Emoji đại diện" },
+        "description": { "type": "string", "maxLength": 300, "description": "Mô tả hũ" },
+        "subs": { "type": "array", "description": "Danh sách các mục con" }
+      },
+      "required": ["id", "name", "limit"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "Ví hoặc tài khoản tiền của người dùng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã ví" },
+        "name": { "type": "string", "maxLength": 100, "description": "Tên ví" },
+        "balance": { "type": "number", "description": "Số dư hiện tại" },
+        "icon": { "type": "string", "maxLength": 10, "description": "Biểu tượng ví" }
+      },
+      "required": ["id", "name", "balance"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Khoản chi tiêu ghi nhận từ quầy quét mã thu ngân",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã giao dịch" },
+        "amount": { "type": "number", "description": "Số tiền chi tiêu" },
+        "jarId": { "type": "string", "description": "Hũ ngân sách tương ứng" },
+        "subCategory": { "type": "string", "maxLength": 100, "description": "Mục con" },
+        "walletId": { "type": "string", "description": "Ví trừ tiền" },
+        "mood": { "type": "string", "enum": ["love", "okay", "hesitant", "regret"], "description": "Cảm xúc tiêu tiền" },
+        "note": { "type": "string", "maxLength": 500, "description": "Ghi chú hóa đơn" },
+        "date": { "type": "string", "maxLength": 10, "description": "Ngày quét YYYY-MM-DD" },
+        "workHours": { "type": "number", "description": "Giờ lao động tương ứng" },
+        "createdAt": { "type": "number", "description": "Timestamp tạo" }
+      },
+      "required": ["id", "amount", "jarId", "walletId", "mood", "date"]
+    },
+    "RecurringExpense": {
+      "title": "RecurringExpense",
+      "description": "Khoản chi tiêu định kỳ hàng tháng như tiền phòng, điện nước",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã hóa đơn định kỳ" },
+        "name": { "type": "string", "maxLength": 100, "description": "Tên khoản chi" },
+        "amount": { "type": "number", "description": "Số tiền định kỳ" },
+        "jarId": { "type": "string", "description": "Hũ trừ tiền" },
+        "dayOfMonth": { "type": "number", "description": "Ngày thanh toán trong tháng" },
+        "icon": { "type": "string", "maxLength": 10, "description": "Icon" },
+        "isActive": { "type": "boolean", "description": "Trạng thái kích hoạt" },
+        "category": { "type": "string", "maxLength": 100, "description": "Danh mục" }
+      },
+      "required": ["id", "name", "amount", "jarId", "dayOfMonth"]
+    },
+    "WishlistItem": {
+      "title": "WishlistItem",
+      "description": "Món đồ trong Giỏ Chờ Đắn Đo 30 ngày",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã món đồ" },
+        "name": { "type": "string", "maxLength": 150, "description": "Tên món muốn mua" },
+        "price": { "type": "number", "description": "Giá tiền" },
+        "targetJarId": { "type": "string", "description": "Hũ dự định trừ" },
+        "addedDate": { "type": "string", "maxLength": 10, "description": "Ngày bỏ vào giỏ" },
+        "cooldownDays": { "type": "number", "description": "Tổng số ngày hạ nhiệt" },
+        "daysRemaining": { "type": "number", "description": "Số ngày đắn đo còn lại" },
+        "reason": { "type": "string", "maxLength": 500, "description": "Lý do muốn mua" },
+        "status": { "type": "string", "enum": ["waiting", "bought", "cancelled_saved"], "description": "Trạng thái quyết định" }
+      },
+      "required": ["id", "name", "price", "targetJarId", "addedDate", "status"]
+    },
+    "AssetDepreciation": {
+      "title": "AssetDepreciation",
+      "description": "Tài sản lâu bền khấu hao theo số lần sử dụng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã tài sản" },
+        "name": { "type": "string", "maxLength": 150, "description": "Tên thiết bị tài sản" },
+        "originalPrice": { "type": "number", "description": "Giá mua ban đầu" },
+        "purchaseDate": { "type": "string", "maxLength": 10, "description": "Ngày mua" },
+        "plannedLifespanDays": { "type": "number", "description": "Số ngày kỳ vọng sử dụng" },
+        "timesUsed": { "type": "number", "description": "Số lần/ngày đã sử dụng thực tế" },
+        "icon": { "type": "string", "maxLength": 10, "description": "Icon tài sản" }
+      },
+      "required": ["id", "name", "originalPrice", "plannedLifespanDays", "timesUsed"]
+    },
+    "DiaryEntry": {
+      "title": "DiaryEntry",
+      "description": "Nhật ký tâm lý tiêu dùng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã nhật ký" },
+        "date": { "type": "string", "maxLength": 10, "description": "Ngày viết" },
+        "prompt": { "type": "string", "maxLength": 200, "description": "Chủ đề gợi ý" },
+        "content": { "type": "string", "maxLength": 1000, "description": "Nội dung suy ngẫm" },
+        "sentiment": { "type": "string", "enum": ["calm", "proud", "regretful", "motivated"], "description": "Tâm trạng" }
+      },
+      "required": ["id", "date", "content"]
+    },
+    "FavoriteSong": {
+      "title": "FavoriteSong",
+      "description": "Bài hát yêu thích trong quầy nhạc siêu thị của người dùng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã bài hát" },
+        "title": { "type": "string", "maxLength": 150, "description": "Tên bài hát" },
+        "artist": { "type": "string", "maxLength": 100, "description": "Nghệ sĩ / Ca sĩ" },
+        "genre": { "type": "string", "maxLength": 50, "description": "Thể loại (Lo-fi, Pastel Pop, Cozy Mart, Cafe Relax, Acoustic)" },
+        "audioUrl": { "type": "string", "maxLength": 500, "description": "Đường dẫn nhạc hoặc link bài hát" },
+        "isFavorite": { "type": "boolean", "description": "Đánh dấu yêu thích" },
+        "moodIcon": { "type": "string", "maxLength": 10, "description": "Biểu tượng cảm xúc của bài hát" },
+        "duration": { "type": "string", "maxLength": 10, "description": "Thời lượng" },
+        "synthType": { "type": "string", "maxLength": 30, "description": "Kiểu giai điệu Synthesizer nền (lofi, cafe, chime, bell, ambient)" },
+        "createdAt": { "type": "number", "description": "Timestamp tạo" }
+      },
+      "required": ["id", "title", "artist"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Hồ sơ cá nhân và cài đặt của người dùng. Chỉ chính người dùng đó mới có quyền đọc và ghi."
+    },
+    "/users/{userId}/jars/{jarId}": {
+      "schema": "Jar",
+      "description": "Hạn mức và phân bổ 6 hũ riêng biệt của người dùng."
+    },
+    "/users/{userId}/wallets/{walletId}": {
+      "schema": "Wallet",
+      "description": "Các nguồn ví tiền riêng biệt của người dùng."
+    },
+    "/users/{userId}/transactions/{txId}": {
+      "schema": "Transaction",
+      "description": "Lịch sử giao dịch quét mã chi tiêu riêng biệt của người dùng."
+    },
+    "/users/{userId}/recurring/{recId}": {
+      "schema": "RecurringExpense",
+      "description": "Hóa đơn định kỳ riêng biệt của người dùng."
+    },
+    "/users/{userId}/wishlist/{itemId}": {
+      "schema": "WishlistItem",
+      "description": "Giỏ chờ đắn đo 30 ngày của người dùng."
+    },
+    "/users/{userId}/assets/{assetId}": {
+      "schema": "AssetDepreciation",
+      "description": "Danh sách tài sản khấu hao của người dùng."
+    },
+    "/users/{userId}/diary/{entryId}": {
+      "schema": "DiaryEntry",
+      "description": "Nhật ký tâm lý tài chính của người dùng."
+    },
+    "/users/{userId}/songs/{songId}": {
+      "schema": "FavoriteSong",
+      "description": "Danh sách bài hát yêu thích trong quầy nhạc siêu thị của người dùng."
+    }
+  }
+}

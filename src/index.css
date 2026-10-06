@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Quicksand', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #FFFDF9;
+    color: #374151;
+  }
+}
+
+/* Supermarket Receipt Sawtooth Edge (Top & Bottom) */
+.receipt-sawtooth-bottom {
+  background-image: radial-gradient(circle at 10px 0, transparent 8px, #ffffff 9px);
+  background-size: 20px 10px;
+  background-repeat: repeat-x;
+}
+
+.receipt-sawtooth-top {
+  background-image: radial-gradient(circle at 10px 10px, transparent 8px, #ffffff 9px);
+  background-size: 20px 10px;
+  background-repeat: repeat-x;
+}
+
+/* Custom Pastel Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FFFDF9;
+}
+::-webkit-scrollbar-thumb {
+  background: #FBCFE8;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #F472B6;
+}
+
+/* Subtle supermarket scanner glow */
+@keyframes scan-line {
+  0% { transform: translateY(-100%); opacity: 0; }
+  50% { opacity: 0.8; }
+  100% { transform: translateY(400%); opacity: 0; }
+}
+
+.scanner-beam {
+  animation: scan-line 2.2s ease-in-out infinite;
+}

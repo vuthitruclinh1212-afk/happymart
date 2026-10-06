@@ -12,7 +12,23 @@ service cloud.firestore {
     }
 
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isSignedIn() && (
+        request.auth.uid == userId ||
+        (request.auth.token.email != null && (
+          (resource != null && resource.data.email == request.auth.token.email) ||
+          (request.resource != null && request.resource.data.email == request.auth.token.email)
+        ))
+      );
+    }
+
+    function isSubOwner(userId) {
+      return isSignedIn() && (
+        request.auth.uid == userId ||
+        (request.auth.token.email != null && (
+          exists(/databases/$(database)/documents/users/$(userId)) &&
+          get(/databases/$(database)/documents/users/$(userId)).data.email == request.auth.token.email
+        ))
+      );
     }
 
     function isValidId(id) {
@@ -21,47 +37,59 @@ service cloud.firestore {
 
     // User document and isolated subcollections
     match /users/{userId} {
-      allow get, update, delete: if isOwner(userId);
-      allow create: if isOwner(userId) && request.resource.data.uid == userId;
+      allow get: if isSignedIn() && (
+        request.auth.uid == userId ||
+        (request.auth.token.email != null && (resource == null || resource.data.email == request.auth.token.email))
+      );
+      allow update, delete: if isOwner(userId);
+      allow create: if isSignedIn() && (
+        request.auth.uid == userId ||
+        (request.auth.token.email != null && request.resource.data.email == request.auth.token.email)
+      );
 
       // Jars subcollection
       match /jars/{jarId} {
-        allow read, write: if isOwner(userId) && isValidId(jarId);
+        allow read, write: if isSubOwner(userId) && isValidId(jarId);
       }
 
       // Wallets subcollection
       match /wallets/{walletId} {
-        allow read, write: if isOwner(userId) && isValidId(walletId);
+        allow read, write: if isSubOwner(userId) && isValidId(walletId);
       }
 
       // Transactions subcollection
       match /transactions/{txId} {
-        allow read, write: if isOwner(userId) && isValidId(txId);
+        allow read, write: if isSubOwner(userId) && isValidId(txId);
       }
 
       // Recurring expenses subcollection
       match /recurring/{recId} {
-        allow read, write: if isOwner(userId) && isValidId(recId);
+        allow read, write: if isSubOwner(userId) && isValidId(recId);
       }
 
       // Wishlist subcollection
       match /wishlist/{itemId} {
-        allow read, write: if isOwner(userId) && isValidId(itemId);
+        allow read, write: if isSubOwner(userId) && isValidId(itemId);
       }
 
       // Asset depreciation subcollection
       match /assets/{assetId} {
-        allow read, write: if isOwner(userId) && isValidId(assetId);
+        allow read, write: if isSubOwner(userId) && isValidId(assetId);
       }
 
       // Financial diary subcollection
       match /diary/{entryId} {
-        allow read, write: if isOwner(userId) && isValidId(entryId);
+        allow read, write: if isSubOwner(userId) && isValidId(entryId);
       }
 
       // Favorite songs subcollection
       match /songs/{songId} {
-        allow read, write: if isOwner(userId) && isValidId(songId);
+        allow read, write: if isSubOwner(userId) && isValidId(songId);
+      }
+
+      // Savings funds subcollection (Mục quỹ tiết kiệm con)
+      match /savings_funds/{fundId} {
+        allow read, write: if isSubOwner(userId) && isValidId(fundId);
       }
     }
   }

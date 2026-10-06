@@ -16,6 +16,7 @@ import {
   Filter,
   Edit2,
   Check,
+  Upload,
 } from 'lucide-react';
 import { FavoriteSong } from '../types';
 import { playSoftPop, playCashRegister } from '../utils/audio';
@@ -78,6 +79,7 @@ export const MusicStationModal: React.FC<MusicStationModalProps> = ({
   const [newAudioUrl, setNewAudioUrl] = useState<string>('');
   const [newSynthType, setNewSynthType] = useState<string>('lofi');
   const [newIcon, setNewIcon] = useState<string>('🎵');
+  const [uploadedFileName, setUploadedFileName] = useState<string>('');
 
   // Edit song form state
   const [editTitle, setEditTitle] = useState<string>('');
@@ -113,7 +115,25 @@ export const MusicStationModal: React.FC<MusicStationModalProps> = ({
     setNewGenre(preset.genre);
     setNewIcon(preset.icon);
     setNewSynthType(preset.synth);
+    setUploadedFileName('');
     setShowAddForm(true);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    playSoftPop();
+    setUploadedFileName(file.name);
+    // Auto fill title if empty
+    if (!newTitle.trim()) {
+      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+      setNewTitle(cleanName);
+    }
+    if (!newArtist.trim()) {
+      setNewArtist('Cá nhân');
+    }
+    const blobUrl = URL.createObjectURL(file);
+    setNewAudioUrl(blobUrl);
   };
 
   const handleStartEdit = (song: FavoriteSong) => {
@@ -169,6 +189,7 @@ export const MusicStationModal: React.FC<MusicStationModalProps> = ({
     setNewTitle('');
     setNewArtist('');
     setNewAudioUrl('');
+    setUploadedFileName('');
     setShowAddForm(false);
   };
 
@@ -187,7 +208,7 @@ export const MusicStationModal: React.FC<MusicStationModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-      <div className="bg-[#FFFDF9] w-full max-w-xl rounded-3xl border-2 border-pink-200 shadow-2xl p-5 sm:p-7 relative overflow-hidden max-h-[92vh] flex flex-col">
+      <div className="bg-[#FFFDF9] w-full max-w-xl rounded-3xl border-2 border-pink-200 shadow-2xl p-4 sm:p-6 relative max-h-[92vh] flex flex-col overflow-hidden">
         {/* Close Button */}
         <button
           type="button"
@@ -200,237 +221,287 @@ export const MusicStationModal: React.FC<MusicStationModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Modal Header */}
-        <div className="flex items-center gap-3 mb-4 shrink-0">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-400 to-indigo-400 text-white flex items-center justify-center text-2xl shadow-sm shrink-0">
+        {/* Modal Header (Fixed at top) */}
+        <div className="flex items-center gap-3 mb-3 shrink-0 pr-10">
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-pink-400 to-indigo-400 text-white flex items-center justify-center text-2xl shadow-sm shrink-0">
             📻
           </div>
           <div>
             <span className="text-[11px] font-black text-pink-700 tracking-wider uppercase bg-pink-100 px-2 py-0.5 rounded-full">
               Quầy Nhạc Siêu Thị Dopamine
             </span>
-            <h2 className="text-lg sm:text-xl font-black text-gray-900 tracking-tight mt-0.5 flex items-center gap-2">
+            <h2 className="text-base sm:text-xl font-black text-gray-900 tracking-tight mt-0.5 flex items-center gap-2">
               Bài Hát Yêu Thích & Lo-Fi BGM 🎶
             </h2>
           </div>
         </div>
 
-        {/* Volume & Player Controls Bar */}
-        <div className="p-3.5 bg-gradient-to-r from-purple-50 via-pink-50 to-amber-50 rounded-2xl border border-pink-200/80 mb-4 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
-            <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg ${
-                isPlaying
-                  ? 'bg-gradient-to-tr from-pink-500 to-purple-600 text-white animate-spin-slow shadow-xs'
-                  : 'bg-white text-gray-400 border'
-              }`}
-            >
-              <Disc3 className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] text-purple-700 font-extrabold uppercase block">
-                {isPlaying ? 'ĐANG PHÁT NHẠC NỀN:' : 'QUẦY NHẠC ĐANG TẠM DỪNG'}
-              </span>
-              <div className="font-black text-gray-900 truncate text-xs sm:text-sm">
-                {currentPlaying ? `${currentPlaying.title} · ${currentPlaying.artist}` : 'Chọn một bài hát để bắt đầu'}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-            {/* Volume slider */}
-            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-200 shadow-2xs">
-              <Volume2 className="w-3.5 h-3.5 text-gray-500" />
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={volume}
-                onChange={(e) => handleVolumeChange(Number(e.target.value))}
-                className="w-20 accent-pink-500 cursor-pointer h-1.5 bg-gray-200 rounded-lg"
-              />
-              <span className="font-bold text-[10px] text-gray-600 font-mono w-7 text-right">
-                {Math.round(volume * 100)}%
-              </span>
-            </div>
-
-            {isPlaying && (
-              <button
-                type="button"
-                onClick={stopMusic}
-                className="px-3 py-1.5 bg-rose-500 text-white rounded-xl font-bold text-xs hover:bg-rose-600 transition-colors shadow-2xs shrink-0"
+        {/* Scrollable Modal Content Container */}
+        <div className="flex-1 overflow-y-auto pr-1 space-y-3.5">
+          {/* Volume & Player Controls Bar */}
+          <div className="p-3 bg-gradient-to-r from-purple-50 via-pink-50 to-amber-50 rounded-2xl border border-pink-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg ${
+                  isPlaying
+                    ? 'bg-gradient-to-tr from-pink-500 to-purple-600 text-white animate-spin-slow shadow-xs'
+                    : 'bg-white text-gray-400 border'
+                }`}
               >
-                Tắt Nhạc ⏸️
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Toolbar: Filter buttons, search, and Add song button */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 mb-3 shrink-0 text-xs">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              type="button"
-              onClick={() => {
-                playSoftPop();
-                setFilterMode('all');
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                filterMode === 'all'
-                  ? 'bg-pink-500 text-white shadow-2xs'
-                  : 'bg-white text-gray-600 hover:bg-gray-100 border'
-              }`}
-            >
-              Tất cả ({songs.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                playSoftPop();
-                setFilterMode('favorites');
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 ${
-                filterMode === 'favorites'
-                  ? 'bg-rose-500 text-white shadow-2xs'
-                  : 'bg-white text-gray-600 hover:bg-gray-100 border'
-              }`}
-            >
-              <Heart className="w-3 h-3 fill-rose-500 text-rose-500" />
-              <span>Yêu thích ({songs.filter((s) => s.isFavorite).length})</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Search Input */}
-            <div className="relative flex-1 sm:w-44">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Tìm bài hát, ca sĩ..."
-                className="w-full pl-8 pr-2.5 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-pink-400"
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                playSoftPop();
-                setShowAddForm(!showAddForm);
-              }}
-              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold flex items-center gap-1 shadow-2xs transition-colors shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Thêm Bài Hát</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Quick Presets row */}
-        <div className="mb-3 px-1 flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] shrink-0">
-          <span className="font-extrabold text-gray-400 shrink-0">Gợi ý nhanh:</span>
-          {PRESET_IDEAS.map((pre, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => handleApplyPreset(pre)}
-              className="px-2 py-0.5 rounded-lg bg-pink-50 hover:bg-pink-100 border border-pink-200/80 text-pink-700 font-bold shrink-0 transition-colors flex items-center gap-1"
-              title="Điền nhanh bài hát mẫu này vào biểu mẫu"
-            >
-              <span>{pre.icon}</span>
-              <span>{pre.title}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Add Song Form Inline */}
-        {showAddForm && (
-          <form
-            onSubmit={handleCreateSongSubmit}
-            className="p-4 bg-white rounded-2xl border-2 border-emerald-200 shadow-sm mb-4 space-y-3 text-xs animate-fadeIn shrink-0"
-          >
-            <div className="flex items-center justify-between border-b pb-2">
-              <span className="font-black text-emerald-800 text-xs flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-emerald-600" />
-                THÊM BÀI HÁT YÊU THÍCH VÀO QUẦY NHẠC
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowAddForm(false)}
-                className="text-gray-400 hover:text-gray-600 p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">Tên bài hát *:</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ví dụ: Cà Phê Một Mình, Haru Haru..."
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-pink-400"
-                />
+                <Disc3 className="w-5 h-5" />
               </div>
-
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">Nghệ sĩ / Ca sĩ *:</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ví dụ: Chillies, Vũ, Đen Vâu, Ghibli..."
-                  value={newArtist}
-                  onChange={(e) => setNewArtist(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-pink-400"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">Thể loại:</label>
-                <input
-                  type="text"
-                  placeholder="Ví dụ: Lo-Fi Chill, Acoustic, R&B..."
-                  value={newGenre}
-                  onChange={(e) => setNewGenre(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-pink-400"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">Biểu tượng bài hát:</label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {MOOD_ICONS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setNewIcon(emoji)}
-                      className={`text-base p-1 rounded-lg border transition-all ${
-                        newIcon === emoji ? 'bg-pink-100 border-pink-400 scale-110 shadow-2xs' : 'bg-gray-50 border-gray-200'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] text-purple-700 font-extrabold uppercase block">
+                  {isPlaying ? 'ĐANG PHÁT NHẠC NỀN:' : 'QUẦY NHẠC ĐANG TẠM DỪNG'}
+                </span>
+                <div className="font-black text-gray-900 truncate text-xs sm:text-sm">
+                  {currentPlaying ? `${currentPlaying.title} · ${currentPlaying.artist}` : 'Chọn một bài hát để bắt đầu'}
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              {/* Volume slider */}
+              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-pink-200 shadow-2xs">
+                <Volume2 className="w-3.5 h-3.5 text-gray-500" />
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={volume}
+                  onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                  className="w-20 accent-pink-500 cursor-pointer h-1.5 bg-gray-200 rounded-lg"
+                />
+                <span className="font-bold text-[10px] text-gray-600 font-mono w-7 text-right">
+                  {Math.round(volume * 100)}%
+                </span>
+              </div>
+
+              {isPlaying && (
+                <button
+                  type="button"
+                  onClick={stopMusic}
+                  className="px-3 py-1.5 bg-rose-500 text-white rounded-xl font-bold text-xs hover:bg-rose-600 transition-colors shadow-2xs shrink-0"
+                >
+                  Tắt Nhạc ⏸️
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Toolbar: Filter buttons, search, and Add song button */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  playSoftPop();
+                  setFilterMode('all');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                  filterMode === 'all'
+                    ? 'bg-pink-500 text-white shadow-2xs'
+                    : 'bg-white text-gray-600 hover:bg-gray-100 border'
+                }`}
+              >
+                Tất cả ({songs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playSoftPop();
+                  setFilterMode('favorites');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 ${
+                  filterMode === 'favorites'
+                    ? 'bg-rose-500 text-white shadow-2xs'
+                    : 'bg-white text-gray-600 hover:bg-gray-100 border'
+                }`}
+              >
+                <Heart className="w-3 h-3 fill-rose-500 text-rose-500" />
+                <span>Yêu thích ({songs.filter((s) => s.isFavorite).length})</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Search Input */}
+              <div className="relative flex-1 sm:w-44">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Tìm bài hát, ca sĩ..."
+                  className="w-full pl-8 pr-2.5 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-pink-400"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  playSoftPop();
+                  setShowAddForm(!showAddForm);
+                }}
+                className={`px-3 py-1.5 text-white rounded-xl font-bold flex items-center gap-1 shadow-2xs transition-all shrink-0 ${
+                  showAddForm ? 'bg-gray-700 hover:bg-gray-800' : 'bg-emerald-500 hover:bg-emerald-600'
+                }`}
+              >
+                <Plus className={`w-3.5 h-3.5 transition-transform ${showAddForm ? 'rotate-45' : ''}`} />
+                <span>{showAddForm ? 'Đóng Biểu Mẫu' : 'Thêm Bài Hát'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Presets row */}
+          <div className="px-1 flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
+            <span className="font-extrabold text-gray-400 shrink-0">Gợi ý nhanh:</span>
+            {PRESET_IDEAS.map((pre, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleApplyPreset(pre)}
+                className="px-2 py-0.5 rounded-lg bg-pink-50 hover:bg-pink-100 border border-pink-200/80 text-pink-700 font-bold shrink-0 transition-colors flex items-center gap-1"
+                title="Điền nhanh bài hát mẫu này vào biểu mẫu"
+              >
+                <span>{pre.icon}</span>
+                <span>{pre.title}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Add Song Form Inline - Dedicated Box with MP3 file upload & clear confirm button */}
+          {showAddForm && (
+            <form
+              onSubmit={handleCreateSongSubmit}
+              className="p-4 bg-gradient-to-br from-emerald-50/70 via-teal-50/40 to-white rounded-2xl border-2 border-emerald-300 shadow-md space-y-3.5 text-xs animate-fadeIn"
+            >
+              <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
+                <span className="font-black text-emerald-900 text-xs sm:text-sm flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  THÊM BÀI HÁT TỪ MP3 HOẶC LO-FI BGM
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAddForm(false)}
+                  className="text-gray-400 hover:text-gray-600 p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* MP3 File Upload Area */}
+              <div className="bg-white p-3 rounded-2xl border-2 border-dashed border-emerald-300 space-y-2">
+                <label className="block font-black text-emerald-950 text-xs">
+                  📁 Tải Lên File Nhạc MP3 Từ Thiết Bị (Điện thoại / Máy tính):
+                </label>
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <label className="w-full sm:w-auto flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-98 text-white rounded-xl font-black cursor-pointer shadow-xs transition-all">
+                    <Upload className="w-4 h-4" />
+                    <span>Chọn File MP3 Từ Máy...</span>
+                    <input
+                      type="file"
+                      accept="audio/mp3,audio/*,.mp3"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                  </label>
+                  <span className="text-[11px] text-gray-500 font-medium text-center sm:text-left">
+                    {uploadedFileName ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-800 font-black bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300">
+                        ✅ {uploadedFileName}
+                      </span>
+                    ) : (
+                      'Hỗ trợ file .mp3, .m4a, .wav'
+                    )}
+                  </span>
+                </div>
+
+                <div className="pt-1 border-t border-gray-100">
+                  <label className="block font-semibold text-gray-600 text-[11px] mb-1">
+                    Hoặc dán URL link MP3 trực tuyến (nếu có):
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/audio.mp3 (tùy chọn)"
+                    value={newAudioUrl}
+                    onChange={(e) => {
+                      setNewAudioUrl(e.target.value);
+                      if (e.target.value) setUploadedFileName('');
+                    }}
+                    className="w-full px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+              </div>
+
+              {/* Title & Artist fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Tên bài hát *:</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ví dụ: Cà Phê Một Mình, Haru Haru..."
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl font-bold focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Nghệ sĩ / Ca sĩ *:</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ví dụ: Chillies, Vũ, Đen Vâu, Ghibli..."
+                    value={newArtist}
+                    onChange={(e) => setNewArtist(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl font-bold focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+              </div>
+
+              {/* Genre & Mood Icon */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Thể loại:</label>
+                  <input
+                    type="text"
+                    placeholder="Ví dụ: Lo-Fi Chill, Acoustic, R&B..."
+                    value={newGenre}
+                    onChange={(e) => setNewGenre(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Biểu tượng bài hát:</label>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {MOOD_ICONS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setNewIcon(emoji)}
+                        className={`text-base p-1 rounded-lg border transition-all ${
+                          newIcon === emoji ? 'bg-pink-100 border-pink-400 scale-110 shadow-2xs' : 'bg-white border-gray-200'
+                        }`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Procedural synth fallback */}
               <div>
                 <label className="block font-bold text-gray-700 mb-1">
-                  Âm hưởng Synthesizer nền (khi nghe thư giãn):
+                  Âm hưởng Synthesizer (nhạc nền ru êm khi không bật MP3):
                 </label>
                 <select
                   value={newSynthType}
                   onChange={(e) => setNewSynthType(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-pink-400 bg-white"
+                  className="w-full px-3 py-1.5 border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-emerald-400 bg-white"
                 >
                   {SYNTH_OPTIONS.map((opt) => (
                     <option key={opt.id} value={opt.id}>
@@ -440,40 +511,33 @@ export const MusicStationModal: React.FC<MusicStationModalProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">
-                  Đường dẫn nhạc online (tùy chọn URL MP3):
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://example.com/audio.mp3 (hoặc để trống)"
-                  value={newAudioUrl}
-                  onChange={(e) => setNewAudioUrl(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-xl font-semibold focus:outline-none focus:border-pink-400"
-                />
+              {/* Prominent Action Buttons Bar (ALWAYS VISIBLE & CLEAR) */}
+              <div className="pt-2 border-t border-emerald-200/80 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                <span className="text-[11px] text-gray-500 font-medium">
+                  {newAudioUrl ? '✨ Nhạc MP3 đã sẵn sàng phát!' : '🎵 Sẽ sử dụng bộ hòa âm Synthesizer Lo-Fi ấm áp.'}
+                </span>
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddForm(false)}
+                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs transition-colors"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 sm:flex-none px-6 py-2.5 bg-gradient-to-r from-emerald-500 via-teal-600 to-emerald-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl font-black text-xs shadow-md shadow-emerald-200 flex items-center justify-center gap-2 transition-all active:scale-95"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Xác Nhận Thêm Nhạc 🎶</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            </form>
+          )}
 
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowAddForm(false)}
-                className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold"
-              >
-                Hủy
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-black shadow-2xs"
-              >
-                Lưu Vào Danh Sách ✨
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* Songs List */}
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+          {/* Songs List */}
+          <div className="space-y-2 pr-1">
           {filteredSongs.length === 0 ? (
             <div className="p-8 text-center bg-gray-50/70 rounded-2xl border border-dashed border-gray-200 text-gray-500 text-xs">
               <Music className="w-8 h-8 text-gray-300 mx-auto mb-2" />
@@ -680,6 +744,7 @@ export const MusicStationModal: React.FC<MusicStationModalProps> = ({
               );
             })
           )}
+          </div>
         </div>
       </div>
     </div>

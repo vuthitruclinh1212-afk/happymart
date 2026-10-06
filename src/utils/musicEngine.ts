@@ -152,9 +152,10 @@ export const playSong = async (song: FavoriteSong) => {
   notifyChange();
 
   // If song has a valid audio URL, attempt to stream/play it
-  if (song.audioUrl && song.audioUrl.trim().startsWith('http')) {
+  const url = song.audioUrl?.trim();
+  if (url && (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:'))) {
     try {
-      const audio = new Audio(song.audioUrl);
+      const audio = new Audio(url);
       audio.volume = musicVolume;
       audio.loop = true;
 

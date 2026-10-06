@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Jar, Wallet, Transaction } from '../types';
+import { Jar, Wallet, Transaction, SavingsFund } from '../types';
+import { SavingsFundsManager } from './SavingsFundsManager';
 import {
   Plus,
   Edit2,
@@ -14,6 +15,7 @@ import {
   BellRing,
   ShieldAlert,
   Sparkles,
+  Shield,
 } from 'lucide-react';
 import { playSoftPop, playCashRegister } from '../utils/audio';
 import {
@@ -30,24 +32,36 @@ interface JarsOverviewProps {
   jars: Jar[];
   wallets: Wallet[];
   transactions: Transaction[];
+  savingsFunds?: SavingsFund[];
   rolloverSavings: number;
   setRolloverSavings: (val: number) => void;
   hourlyWage: number;
   onSelectSubcategoryForScan: (jarId: string, subCategory: string) => void;
+  onNavigateToIncome?: (walletId?: string) => void;
   onUpdateJarLimit: (jarId: string, newLimit: number) => void;
   onAddSubCategory: (jarId: string, subName: string) => void;
+  onAddSavingsFund?: (fund: Omit<SavingsFund, 'id' | 'createdAt'>) => void;
+  onUpdateSavingsFund?: (fund: SavingsFund) => void;
+  onDeleteSavingsFund?: (id: string) => void;
+  onDepositSavingsFund?: (fundId: string, amount: number) => void;
 }
 
 export const JarsOverview: React.FC<JarsOverviewProps> = ({
   jars,
   wallets,
   transactions,
+  savingsFunds = [],
   rolloverSavings,
   setRolloverSavings,
   hourlyWage,
   onSelectSubcategoryForScan,
+  onNavigateToIncome,
   onUpdateJarLimit,
   onAddSubCategory,
+  onAddSavingsFund,
+  onUpdateSavingsFund,
+  onDeleteSavingsFund,
+  onDepositSavingsFund,
 }) => {
   const [editingJarId, setEditingJarId] = useState<string | null>(null);
   const [newLimitInput, setNewLimitInput] = useState<string>('');
@@ -68,18 +82,68 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
   const [chartTimeRange, setChartTimeRange] = useState<'7d' | '14d' | '30d'>('7d');
   const [chartMode, setChartMode] = useState<'daily' | 'cumulative'>('daily');
 
-  // Calculate spent per jar
+  // Total monthly auto-deduction from savings funds (MẶC ĐỊNH CHI ĐỂ TIẾT KIỆM)
+  const totalMonthlySavings = useMemo(() => {
+    return (savingsFunds || [])
+      .filter((f) => !f.isCompleted)
+      .reduce((sum, f) => sum + f.monthlyAmount, 0);
+  }, [savingsFunds]);
+
+  // Calculate spent per jar (Chỉ tính giao dịch chi tiêu, loại trừ thu nhập)
   const jarSpentMap: Record<string, number> = {};
   jars.forEach((j) => (jarSpentMap[j.id] = 0));
   transactions.forEach((t) => {
-    if (jarSpentMap[t.jarId] !== undefined) {
+    if (t.type !== 'income' && jarSpentMap[t.jarId] !== undefined) {
       jarSpentMap[t.jarId] += Number(t.amount);
     }
   });
 
+  // MẶC ĐỊNH MỖI THÁNG ĐỀU TỰ ĐỘNG CHI ĐỂ TIẾT KIỆM CHO HŨ LTSS (KHÔNG CẦN NHẬP THỦ CÔNG)
+  if (jarSpentMap['ltss'] !== undefined) {
+    jarSpentMap['ltss'] += totalMonthlySavings;
+  }
+
+  const totalIncome = transactions
+    .filter((t) => t.type === 'income')
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+
+  // Chi tiêu tiêu hao thực tế (tiền đã thực sự rời khỏi túi cho các giao dịch quét mã/chi tiêu)
+  const actualExpenses = useMemo(() => {
+    return transactions
+      .filter((t) => t.type !== 'income')
+      .reduce((sum, t) => sum + Number(t.amount), 0);
+  }, [transactions]);
+
+  // Tổng số tiền hiện đang tích lũy trong các quỹ tiết kiệm con (vẫn là tài sản của bạn, được khóa lại)
+  const totalSavedInFunds = useMemo(() => {
+    return (savingsFunds || []).reduce((sum, f) => sum + f.currentSaved, 0);
+  }, [savingsFunds]);
+
   const totalBudget = jars.reduce((sum, j) => sum + j.limit, 0);
   const totalSpent = Object.values(jarSpentMap).reduce((sum, v) => sum + v, 0);
   const totalWalletBalance = wallets.reduce((sum, w) => sum + w.balance, 0);
+  
+  // Tiền khả dụng để chi tiêu tự do = Tổng số dư trong các ví - Số tiền đang khóa trong quỹ tiết kiệm
+  const totalAvailableToSpend = Math.max(0, totalWalletBalance - totalSavedInFunds);
+
+  // Phân bổ quỹ tiết kiệm theo từng ví cụ thể
+  const walletFundAllocations = useMemo(() => {
+    const map: Record<string, { totalSaved: number; funds: SavingsFund[] }> = {};
+    wallets.forEach((w) => {
+      map[w.id] = { totalSaved: 0, funds: [] };
+    });
+
+    (savingsFunds || []).forEach((f) => {
+      const targetId = f.walletId && map[f.walletId] ? f.walletId : wallets[0]?.id;
+      if (targetId && map[targetId]) {
+        map[targetId].totalSaved += f.currentSaved;
+        map[targetId].funds.push(f);
+      }
+    });
+
+    return map;
+  }, [wallets, savingsFunds]);
+
   const totalWorkHoursUsed = (totalSpent / (hourlyWage || 1)).toFixed(1);
   const overallSpentPercent = totalBudget > 0 ? Math.min(Math.round((totalSpent / totalBudget) * 100), 100) : 0;
 
@@ -150,17 +214,22 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
 
       // Find all transactions on this date
       const dayTxs = transactions.filter((t) => t.date === dateStr);
-      const dailySpent = dayTxs.reduce((sum, t) => sum + Number(t.amount), 0);
+      const expenseTxs = dayTxs.filter((t) => t.type !== 'income');
+      const dailySpent = expenseTxs.reduce((sum, t) => sum + Number(t.amount), 0);
+      const dailyIncome = dayTxs
+        .filter((t) => t.type === 'income')
+        .reduce((sum, t) => sum + Number(t.amount), 0);
       cumulativeSum += dailySpent;
 
       data.push({
         dateStr,
         dateLabel: i === 0 ? 'Hôm nay' : dayLabel,
         dailySpent,
+        dailyIncome,
         cumulativeSpent: cumulativeSum,
-        txCount: dayTxs.length,
+        txCount: expenseTxs.length,
         workHours: Number((dailySpent / (hourlyWage || 1)).toFixed(1)),
-        items: dayTxs.map((t) => t.subCategory),
+        items: expenseTxs.map((t) => t.subCategory),
       });
     }
     return data;
@@ -277,34 +346,103 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
           </div>
         </div>
 
-        {/* Card 2: Wallets (Nguồn tiền) */}
+        {/* Card 2: Wallets (Nguồn tiền) with Tri-Balance Breakdown */}
         <div className="bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-5 rounded-3xl border border-emerald-200/80 shadow-xs md:col-span-2 flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-emerald-800 tracking-wider">
-                NGUỒN TIỀN CỦA BẠN (CÁC VÍ) 💳
-              </span>
-              <span className="text-xs text-emerald-600 font-semibold">
-                Tổng: {totalWalletBalance.toLocaleString('vi-VN')} đ
-              </span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-2">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-emerald-900 tracking-wider">
+                  NGUỒN TIỀN CỦA BẠN (CÁC VÍ) 💳
+                </span>
+                <span className="text-xs text-emerald-800 font-extrabold bg-emerald-100/90 px-2 py-0.5 rounded-lg border border-emerald-200">
+                  Tổng Sở Hữu: {totalWalletBalance.toLocaleString('vi-VN')} đ
+                </span>
+                <span className="text-xs text-purple-800 font-black bg-purple-100/90 px-2 py-0.5 rounded-lg border border-purple-200">
+                  🛡️ Khóa Tiết Kiệm: {totalSavedInFunds.toLocaleString('vi-VN')} đ
+                </span>
+                <span className="text-xs text-teal-900 font-black bg-teal-200/80 px-2 py-0.5 rounded-lg border border-teal-300">
+                  🟢 Khả Dụng Để Tiêu: {totalAvailableToSpend.toLocaleString('vi-VN')} đ
+                </span>
+              </div>
+              {totalIncome > 0 && (
+                <div className="text-[11px] text-teal-700 font-semibold mt-1">
+                  Đã ghi nhận thu nhập: +{totalIncome.toLocaleString('vi-VN')} đ ✨
+                </div>
+              )}
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                playCashRegister();
+                if (onNavigateToIncome) onNavigateToIncome();
+              }}
+              className="self-start sm:self-auto px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 shrink-0"
+              title="Ghi nhận khoản thu mới và nạp vào ví mong muốn"
+            >
+              <span>💰 Nạp Tiền Vào Ví</span>
+            </button>
           </div>
 
-          <div className="flex flex-wrap gap-2.5 mt-1">
-            {wallets.map((w) => (
-              <div
-                key={w.id}
-                className="bg-white/90 backdrop-blur-xs px-3.5 py-2 rounded-2xl border border-emerald-200/90 text-xs text-gray-700 flex items-center gap-2 shadow-2xs hover:border-emerald-400 transition-colors"
-              >
-                <span className="text-base">{w.icon}</span>
-                <div>
-                  <div className="font-semibold text-gray-600">{w.name}</div>
-                  <div className="font-extrabold text-emerald-700 text-sm">
-                    {w.balance.toLocaleString('vi-VN')} đ
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 mt-2">
+            {wallets.map((w) => {
+              const alloc = walletFundAllocations[w.id];
+              const savedInThisWallet = alloc?.totalSaved || 0;
+              const spendableInThisWallet = Math.max(0, w.balance - savedInThisWallet);
+
+              return (
+                <div
+                  key={w.id}
+                  onClick={() => {
+                    playSoftPop();
+                    if (onNavigateToIncome) onNavigateToIncome(w.id);
+                  }}
+                  className="bg-white/95 backdrop-blur-xs p-3 rounded-2xl border border-emerald-200/90 text-xs text-gray-700 flex items-center justify-between gap-2 shadow-2xs hover:border-emerald-400 hover:shadow-xs transition-all cursor-pointer group"
+                  title={`Bấm để nạp thêm thu nhập vào ${w.name}`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-2xl shrink-0 group-hover:scale-110 transition-transform">
+                      {w.icon}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-bold text-gray-800 truncate">{w.name}</div>
+                      <div className="font-black text-emerald-800 text-sm tracking-tight">
+                        {w.balance.toLocaleString('vi-VN')}{' '}
+                        <span className="text-[10px] font-normal text-emerald-600">đ tổng</span>
+                      </div>
+                      {savedInThisWallet > 0 ? (
+                        <div className="text-[10px] space-y-0.5 mt-0.5">
+                          <div className="text-purple-700 font-bold flex items-center gap-1 truncate">
+                            <span>🛡️ Giữ quỹ: {savedInThisWallet.toLocaleString('vi-VN')} đ</span>
+                            <span className="text-gray-400">({alloc?.funds.map((f) => f.icon).join('')})</span>
+                          </div>
+                          <div className="text-teal-700 font-black flex items-center gap-1">
+                            <span>🟢 Được tiêu: {spendableInThisWallet.toLocaleString('vi-VN')} đ</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-teal-700 font-bold mt-0.5 flex items-center gap-1">
+                          <span>🟢 Khả dụng 100% để tiêu</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playSoftPop();
+                      if (onNavigateToIncome) onNavigateToIncome(w.id);
+                    }}
+                    className="shrink-0 px-2 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-extrabold rounded-xl text-[10px] transition-colors"
+                    title={`Nạp tiền vào ${w.name}`}
+                  >
+                    + Nạp
+                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -316,11 +454,20 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
             {overallSpentPercent}%
           </div>
           <div>
-            <div className="text-xs font-bold text-gray-400">TỔNG NGÂN SÁCH 6 HŨ THÁNG NÀY</div>
+            <div className="text-xs font-bold text-gray-400">ĐIỀU PHỐI NGÂN SÁCH THÁNG NÀY</div>
             <div className="text-base sm:text-lg font-black text-gray-800">
-              Đã tiêu {totalSpent.toLocaleString('vi-VN')} đ{' '}
+              Đã phân bổ {totalSpent.toLocaleString('vi-VN')} đ{' '}
               <span className="text-gray-400 text-xs font-normal">
                 / {totalBudget.toLocaleString('vi-VN')} đ
+              </span>
+            </div>
+            {/* Detailed financial separation: Expenses vs Savings */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-[11px]">
+              <span className="text-pink-700 font-bold bg-pink-50 px-2 py-0.5 rounded-lg border border-pink-200">
+                💸 Đã tiêu thực tế: {actualExpenses.toLocaleString('vi-VN')} đ
+              </span>
+              <span className="text-purple-700 font-bold bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-200">
+                🛡️ Trích quỹ tiết kiệm: {totalMonthlySavings.toLocaleString('vi-VN')} đ (Vẫn là tiền của bạn)
               </span>
             </div>
           </div>
@@ -629,6 +776,17 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
         </div>
       )}
 
+      {/* 2. CHỖ TIẾT KIỆM ĐẶC BIỆT: CÁC QUỸ TIẾT KIỆM MỤC TIÊU CON (TỰ ĐỘNG TRÍCH HÀNG THÁNG) */}
+      <SavingsFundsManager
+        savingsFunds={savingsFunds}
+        wallets={wallets}
+        hourlyWage={hourlyWage}
+        onAddSavingsFund={onAddSavingsFund || (() => {})}
+        onUpdateSavingsFund={onUpdateSavingsFund || (() => {})}
+        onDeleteSavingsFund={onDeleteSavingsFund || (() => {})}
+        onDepositSavingsFund={onDepositSavingsFund || (() => {})}
+      />
+
       {/* The 6 Jars Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {jarsWithStatus.map((jar) => {
@@ -775,13 +933,50 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                     )}
                   </span>
                 </div>
+
+                {/* Đặc biệt cho Hũ Tiết Kiệm (LTSS): Hiển thị chi tiết khoản chi tự động hàng tháng */}
+                {jar.id === 'ltss' && totalMonthlySavings > 0 && (
+                  <div className="mt-2 p-2 rounded-xl bg-purple-100/90 border border-purple-200 text-[11px] text-purple-950 flex items-center justify-between">
+                    <span className="font-bold flex items-center gap-1">
+                      <span>🛡️ Mặc định chi:</span>
+                      <strong className="text-purple-700">+{totalMonthlySavings.toLocaleString('vi-VN')} đ/tháng</strong>
+                    </span>
+                    <span className="text-[10px] bg-purple-200 px-1.5 py-0.5 rounded-md font-extrabold">
+                      {savingsFunds.filter((f) => !f.isCompleted).length} quỹ mục tiêu
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Subcategories list */}
               <div className="mt-4 pt-3 border-t border-black/10">
                 <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 mb-1.5">
-                  <span>MỤC CON (BẤM ĐỂ QUÉT NHANH):</span>
+                  <span>
+                    {jar.id === 'ltss'
+                      ? 'CÁC MỤC TIẾT KIỆM CON (TỰ ĐỘNG ĐỊNH KỲ):'
+                      : 'MỤC CON (BẤM ĐỂ QUÉT NHANH):'}
+                  </span>
                 </div>
+
+                {/* For LTSS: Show dedicated savings funds */}
+                {jar.id === 'ltss' && savingsFunds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {savingsFunds.map((fund) => (
+                      <div
+                        key={fund.id}
+                        className="text-[11px] bg-purple-100/80 text-purple-950 px-2.5 py-1 rounded-xl font-bold border border-purple-200 flex items-center gap-1.5 shadow-2xs"
+                        title={`Mục tiêu: ${fund.targetAmount.toLocaleString('vi-VN')} đ trong ${fund.targetMonths} tháng. Tự động chi: ${fund.monthlyAmount.toLocaleString('vi-VN')} đ/tháng`}
+                      >
+                        <span>{fund.icon}</span>
+                        <span>{fund.name}</span>
+                        <span className="text-[10px] text-purple-700 bg-white/80 px-1 py-0.2 rounded font-black">
+                          {fund.monthlyAmount >= 1000000 ? `${(fund.monthlyAmount / 1000000).toFixed(1)}Tr` : `${(fund.monthlyAmount / 1000).toFixed(0)}k`}/tháng
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-1.5">
                   {jar.subs.map((s, idx) => (
                     <button

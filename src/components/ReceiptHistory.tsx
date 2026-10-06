@@ -22,6 +22,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
   onEditTransaction,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'expense' | 'income'>('all');
   const [selectedJarFilter, setSelectedJarFilter] = useState<string>('all');
   const [selectedMoodFilter, setSelectedMoodFilter] = useState<string>('all');
   
@@ -33,6 +34,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
   // Edit transaction state
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [editAmountStr, setEditAmountStr] = useState<string>('');
+  const [editType, setEditType] = useState<'expense' | 'income'>('expense');
   const [editJarId, setEditJarId] = useState<string>('nec');
   const [editSubCategory, setEditSubCategory] = useState<string>('');
   const [editWalletId, setEditWalletId] = useState<string>('cash');
@@ -48,9 +50,13 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
     return d.toISOString().split('T')[0];
   }, []);
 
-  // Filter transactions with date filter logic
+  // Filter transactions with date and type filter logic
   const filtered = useMemo(() => {
     return transactions.filter((t) => {
+      // Type filter (income vs expense)
+      const txType = t.type || 'expense';
+      if (selectedTypeFilter !== 'all' && txType !== selectedTypeFilter) return false;
+
       // Jar filter
       if (selectedJarFilter !== 'all' && t.jarId !== selectedJarFilter) return false;
       
@@ -78,6 +84,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
     });
   }, [
     transactions,
+    selectedTypeFilter,
     selectedJarFilter,
     selectedMoodFilter,
     dateFilterPreset,
@@ -100,8 +107,14 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
     return { ...m, count, pct, totalAmount };
   });
 
-  const totalFilteredAmount = filtered.reduce((sum, t) => sum + t.amount, 0);
-  const totalFilteredHours = (totalFilteredAmount / (hourlyWage || 1)).toFixed(1);
+  const totalFilteredExpense = filtered
+    .filter((t) => t.type !== 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const totalFilteredIncome = filtered
+    .filter((t) => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const netFilteredCashFlow = totalFilteredIncome - totalFilteredExpense;
+  const totalFilteredHours = (totalFilteredExpense / (hourlyWage || 1)).toFixed(1);
 
   const handlePrint = () => {
     playSoftPop();
@@ -112,6 +125,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
     playSoftPop();
     setEditingTx(tx);
     setEditAmountStr(String(tx.amount));
+    setEditType(tx.type || 'expense');
     setEditJarId(tx.jarId);
     setEditSubCategory(tx.subCategory);
     setEditWalletId(tx.walletId);
@@ -132,6 +146,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
     const updated: Transaction = {
       ...editingTx,
       amount: newAmount,
+      type: editType,
       jarId: editJarId,
       subCategory: editSubCategory,
       walletId: editWalletId,
@@ -341,18 +356,64 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
           </div>
         </div>
 
-        {/* Row 2: Search & Jar & Mood dropdowns & Print */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto flex-1">
+        {/* Row 2: Type Filter, Search & Jar & Mood dropdowns & Print */}
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-between gap-3">
+          {/* Type Filter Buttons */}
+          <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-2xl shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                playSoftPop();
+                setSelectedTypeFilter('all');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs ${
+                selectedTypeFilter === 'all'
+                  ? 'bg-white text-gray-900 shadow-2xs'
+                  : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              Tất cả ({transactions.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                playSoftPop();
+                setSelectedTypeFilter('expense');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs flex items-center gap-1 ${
+                selectedTypeFilter === 'expense'
+                  ? 'bg-rose-500 text-white shadow-2xs'
+                  : 'text-gray-500 hover:text-rose-700'
+              }`}
+            >
+              <span>🛒 Chi tiêu ({transactions.filter((t) => t.type !== 'income').length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                playSoftPop();
+                setSelectedTypeFilter('income');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs flex items-center gap-1 ${
+                selectedTypeFilter === 'income'
+                  ? 'bg-emerald-600 text-white shadow-2xs'
+                  : 'text-gray-500 hover:text-emerald-700'
+              }`}
+            >
+              <span>💰 Thu nhập ({transactions.filter((t) => t.type === 'income').length})</span>
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 flex-1">
             {/* Search bar */}
-            <div className="relative flex-1 sm:w-56">
+            <div className="relative flex-1 sm:w-48 min-w-36">
               <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Tìm món đồ, ghi chú..."
+                placeholder="Tìm món đồ, nguồn thu, ghi chú..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-pink-400"
+                className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-pink-400 text-xs"
               />
             </div>
 
@@ -360,7 +421,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
             <select
               value={selectedJarFilter}
               onChange={(e) => setSelectedJarFilter(e.target.value)}
-              className="py-2 px-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-700 focus:outline-none"
+              className="py-2 px-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-700 focus:outline-none text-xs"
             >
               <option value="all">Tất cả 6 hũ</option>
               {jars.map((j) => (
@@ -374,7 +435,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
             <select
               value={selectedMoodFilter}
               onChange={(e) => setSelectedMoodFilter(e.target.value)}
-              className="py-2 px-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-700 focus:outline-none"
+              className="py-2 px-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-700 focus:outline-none text-xs"
             >
               <option value="all">Mọi tâm trạng</option>
               {MOODS.map((m) => (
@@ -383,17 +444,48 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                 </option>
               ))}
             </select>
+
+            {/* Action: Print */}
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl flex items-center gap-1.5 transition-colors shrink-0 text-xs"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>In Phiếu</span>
+            </button>
+          </div>
+        </div>
+
+        {/* CASH FLOW QUICK SUMMARY PILLS */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-gray-100">
+          <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+            <span className="text-emerald-800 font-extrabold text-[11px]">TỔNG THU VÀO:</span>
+            <strong className="text-emerald-700 font-black text-sm tabular-nums">
+              +{totalFilteredIncome.toLocaleString('vi-VN')} đ
+            </strong>
           </div>
 
-          {/* Action: Print */}
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl flex items-center gap-1.5 transition-colors self-end sm:self-auto shrink-0"
+          <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-between">
+            <span className="text-rose-800 font-extrabold text-[11px]">TỔNG CHI TIÊU:</span>
+            <strong className="text-rose-700 font-black text-sm tabular-nums">
+              -{totalFilteredExpense.toLocaleString('vi-VN')} đ
+            </strong>
+          </div>
+
+          <div
+            className={`p-3 rounded-2xl border flex items-center justify-between ${
+              netFilteredCashFlow >= 0
+                ? 'bg-purple-50 border-purple-200 text-purple-900'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}
           >
-            <Printer className="w-3.5 h-3.5" />
-            <span>In Phiếu</span>
-          </button>
+            <span className="font-extrabold text-[11px]">DÒNG TIỀN RÒNG (NET):</span>
+            <strong className="font-black text-sm tabular-nums">
+              {netFilteredCashFlow >= 0 ? '+' : ''}
+              {netFilteredCashFlow.toLocaleString('vi-VN')} đ
+            </strong>
+          </div>
         </div>
       </div>
 
@@ -440,6 +532,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                 </div>
 
                 {filtered.map((t) => {
+                  const isIncome = t.type === 'income';
                   const jar = jars.find((j) => j.id === t.jarId);
                   const moodObj = MOODS.find((m) => m.id === t.mood);
                   const wallet = wallets.find((w) => w.id === t.walletId);
@@ -447,14 +540,29 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                   return (
                     <div
                       key={t.id}
-                      className="grid grid-cols-12 items-center text-xs py-2 border-b border-gray-100 hover:bg-pink-50/40 rounded-lg px-1 transition-colors group"
+                      className={`grid grid-cols-12 items-center text-xs py-2 border-b rounded-lg px-1 transition-colors group ${
+                        isIncome
+                          ? 'border-emerald-100 hover:bg-emerald-50/40 bg-emerald-50/15'
+                          : 'border-gray-100 hover:bg-pink-50/40'
+                      }`}
                     >
                       <div className="col-span-5">
-                        <div className="font-bold text-gray-800 flex items-center gap-1">
-                          <span>{t.subCategory}</span>
+                        <div className="font-bold text-gray-800 flex items-center gap-1.5">
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md font-black text-[9px] shrink-0 ${
+                              isIncome
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {isIncome ? '💰 THU' : '🛒 CHI'}
+                          </span>
+                          <span className="truncate">{t.subCategory}</span>
                         </div>
-                        <div className="text-[10px] text-gray-400 truncate">
-                          {jar?.name} · {t.date} {wallet?.icon}
+                        <div className="text-[10px] text-gray-400 truncate mt-0.5">
+                          {isIncome
+                            ? `Nạp vào: ${wallet?.name || 'Ví'} ${wallet?.icon || '💵'} · ${t.date}`
+                            : `${jar?.name || 'Hũ'} · ${t.date} ${wallet?.icon || '💳'}`}
                         </div>
                         {t.note && (
                           <div className="text-[10px] text-purple-700 italic truncate">
@@ -468,15 +576,20 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                       </div>
 
                       <div className="col-span-2 text-center text-[11px] font-bold text-purple-700">
-                        ⏱️ {t.workHours}h
+                        {isIncome ? '✨' : `⏱️ ${t.workHours}h`}
                       </div>
 
                       <div className="col-span-3 text-right flex items-center justify-end gap-1.5">
-                        <div className="font-black text-gray-900 tabular-nums">
-                          -{t.amount.toLocaleString('vi-VN')} đ
+                        <div
+                          className={`font-black tabular-nums ${
+                            isIncome ? 'text-emerald-600 font-extrabold' : 'text-gray-900'
+                          }`}
+                        >
+                          {isIncome ? '+' : '-'}
+                          {t.amount.toLocaleString('vi-VN')} đ
                         </div>
 
-                        {/* EDIT BUTTON (Chỉnh sửa nghiệp vụ chi tiêu) */}
+                        {/* EDIT BUTTON (Chỉnh sửa nghiệp vụ) */}
                         <button
                           type="button"
                           onClick={() => handleOpenEdit(t)}
@@ -490,12 +603,15 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            if (window.confirm(`Xác nhận xóa giao dịch "${t.subCategory}" và hoàn lại tiền vào ví?`)) {
+                            const confirmMsg = isIncome
+                              ? `Xác nhận xóa khoản thu nhập "${t.subCategory}" (+${t.amount.toLocaleString('vi-VN')} đ) và trừ lại tiền khỏi ví ${wallet?.name || ''}?`
+                              : `Xác nhận xóa giao dịch chi tiêu "${t.subCategory}" (-${t.amount.toLocaleString('vi-VN')} đ) và hoàn lại tiền vào ví?`;
+                            if (window.confirm(confirmMsg)) {
                               onDeleteTransaction(t.id);
                             }
                           }}
                           className="p-1 text-gray-400 hover:text-rose-600 transition-colors rounded-md hover:bg-rose-50"
-                          title="Xóa và hoàn ví"
+                          title="Xóa giao dịch"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -509,16 +625,31 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
             {/* Receipt Summary Totals */}
             <div className="mt-6 pt-4 border-t-2 border-dashed border-gray-300 space-y-1.5 font-mono text-xs">
               <div className="flex justify-between text-gray-600">
-                <span>TỔNG SỐ LƯỢNG MÓN:</span>
-                <span className="font-bold">{filtered.length} món</span>
+                <span>TỔNG SỐ LƯỢNG GIAO DỊCH:</span>
+                <span className="font-bold">{filtered.length} giao dịch</span>
               </div>
               <div className="flex justify-between text-gray-600">
-                <span>TỔNG THỜI GIAN LÀM VIỆC:</span>
+                <span>TỔNG THỜI GIAN LÀM VIỆC (CHI TIÊU):</span>
                 <span className="font-bold text-purple-700">⏱️ {totalFilteredHours} GIỜ</span>
               </div>
-              <div className="flex justify-between text-base font-black text-gray-900 pt-2 border-t border-gray-200">
+              <div className="flex justify-between text-emerald-700 font-bold">
+                <span>TỔNG TIỀN THU VÀO:</span>
+                <span className="tabular-nums">+{totalFilteredIncome.toLocaleString('vi-VN')} đ</span>
+              </div>
+              <div className="flex justify-between text-rose-700 font-bold">
                 <span>TỔNG TIỀN ĐÃ CHI:</span>
-                <span className="tabular-nums">-{totalFilteredAmount.toLocaleString('vi-VN')} đ</span>
+                <span className="tabular-nums">-{totalFilteredExpense.toLocaleString('vi-VN')} đ</span>
+              </div>
+              <div className="flex justify-between text-base font-black text-gray-900 pt-2 border-t border-gray-200">
+                <span>DÒNG TIỀN RÒNG (NET):</span>
+                <span
+                  className={`tabular-nums ${
+                    netFilteredCashFlow >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                  }`}
+                >
+                  {netFilteredCashFlow >= 0 ? '+' : ''}
+                  {netFilteredCashFlow.toLocaleString('vi-VN')} đ
+                </span>
               </div>
             </div>
 
@@ -558,7 +689,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-2xl">✏️</span>
                 <h3 className="font-black text-base text-gray-900">
-                  CHỈNH SỬA GIAO DỊCH CHI TIÊU
+                  CHỈNH SỬA GIAO DỊCH ({editType === 'income' ? 'THU NHẬP' : 'CHI TIÊU'})
                 </h3>
               </div>
               <button
@@ -571,16 +702,46 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
             </div>
 
             <form onSubmit={handleSaveEdit} className="space-y-3">
+              {/* Type Switcher */}
+              <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-2xl font-bold text-xs">
+                <button
+                  type="button"
+                  onClick={() => setEditType('expense')}
+                  className={`py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                    editType === 'expense'
+                      ? 'bg-rose-500 text-white shadow-2xs'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  🛒 Chi Tiêu (Tiền Ra)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditType('income')}
+                  className={`py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                    editType === 'income'
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  💰 Thu Nhập (Tiền Vào)
+                </button>
+              </div>
+
               {/* Amount */}
               <div>
                 <label className="block font-bold text-gray-700 mb-1">
-                  SỐ TIỀN CHI (VNĐ) *
+                  SỐ TIỀN ({editType === 'income' ? 'THU NHẬP' : 'CHI TIÊU'}) (VNĐ) *
                 </label>
                 <input
                   type="number"
                   value={editAmountStr}
                   onChange={(e) => setEditAmountStr(e.target.value)}
-                  className="w-full text-xl font-black p-3 bg-amber-50/70 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  className={`w-full text-xl font-black p-3 border rounded-xl focus:outline-none focus:ring-2 ${
+                    editType === 'income'
+                      ? 'bg-emerald-50/70 border-emerald-300 focus:ring-emerald-400 text-emerald-950'
+                      : 'bg-amber-50/70 border-amber-300 focus:ring-amber-400 text-gray-900'
+                  }`}
                   required
                 />
               </div>
@@ -588,7 +749,9 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
               {/* Jar & SubCategory */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-bold text-gray-700 mb-1">HŨ CHI TIÊU</label>
+                  <label className="block font-bold text-gray-700 mb-1">
+                    {editType === 'income' ? 'HŨ PHÂN BỔ' : 'HŨ CHI TIÊU'}
+                  </label>
                   <select
                     value={editJarId}
                     onChange={(e) => {
@@ -610,25 +773,26 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-gray-700 mb-1">MỤC CON</label>
-                  <select
+                  <label className="block font-bold text-gray-700 mb-1">
+                    {editType === 'income' ? 'NGUỒN THU' : 'MỤC CON'}
+                  </label>
+                  <input
+                    type="text"
                     value={editSubCategory}
                     onChange={(e) => setEditSubCategory(e.target.value)}
+                    placeholder={editType === 'income' ? 'VD: Lương, Thưởng...' : 'VD: Ăn sáng...'}
                     className="w-full p-2.5 bg-gray-50 border rounded-xl font-bold"
-                  >
-                    {currentEditJar.subs.map((s, idx) => (
-                      <option key={idx} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                    required
+                  />
                 </div>
               </div>
 
               {/* Wallet & Date */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-bold text-gray-700 mb-1">VÍ NGUỒN TIỀN</label>
+                  <label className="block font-bold text-gray-700 mb-1">
+                    {editType === 'income' ? 'VÍ NHẬN TIỀN' : 'VÍ CHI TIỀN'}
+                  </label>
                   <select
                     value={editWalletId}
                     onChange={(e) => setEditWalletId(e.target.value)}
@@ -655,7 +819,9 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
 
               {/* Mood */}
               <div>
-                <label className="block font-bold text-gray-700 mb-1">TÂM TRẠNG KHOẢN CHI</label>
+                <label className="block font-bold text-gray-700 mb-1">
+                  {editType === 'income' ? 'CẢM XÚC KHI NHẬN TIỀN' : 'TÂM TRẠNG KHOẢN CHI'}
+                </label>
                 <div className="grid grid-cols-4 gap-1.5">
                   {MOODS.map((m) => (
                     <button
@@ -682,7 +848,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                   type="text"
                   value={editNote}
                   onChange={(e) => setEditNote(e.target.value)}
-                  placeholder="Ghi chú món đồ..."
+                  placeholder="Ghi chú giao dịch..."
                   className="w-full p-2.5 bg-gray-50 border rounded-xl"
                 />
               </div>

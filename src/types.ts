@@ -42,6 +42,8 @@ export interface Transaction {
   date: string;
   workHours: number;
   createdAt: number;
+  type?: 'expense' | 'income';
+  source?: string;
 }
 
 export interface RecurringExpense {
@@ -53,6 +55,20 @@ export interface RecurringExpense {
   icon: string;
   isActive: boolean;
   category: string;
+}
+
+export interface SavingsFund {
+  id: string;
+  name: string; // Tên quỹ tiết kiệm (VD: Mua điện thoại, Quỹ khẩn cấp)
+  icon: string; // Icon biểu tượng (📱, 🛡️, 💻, 🛵, ...)
+  targetAmount: number; // Giá trị mục tiêu cần có
+  targetMonths: number; // Thời gian muốn tiết kiệm (số tháng)
+  monthlyAmount: number; // Tự động tính: Math.ceil(targetAmount / targetMonths)
+  currentSaved: number; // Số tiền đã tích lũy đến nay
+  walletId?: string; // Nguồn ví tích lũy (VD: bank, cash)
+  createdAt: number;
+  note?: string;
+  isCompleted?: boolean;
 }
 
 export type ScenarioType = 'tight' | 'normal' | 'splurge' | 'optimistic' | 'neutral' | 'pessimistic';

@@ -11,6 +11,7 @@ import {
   RecurringExpense,
   UserProfile,
   FavoriteSong,
+  SavingsFund,
 } from '../types';
 
 export const MOODS: Mood[] = [
@@ -119,6 +120,35 @@ export const INITIAL_RECURRING: RecurringExpense[] = [
   { id: 'rec-rent', name: 'Tiền thuê nhà / phòng trọ', amount: 2500000, jarId: 'nec', dayOfMonth: 5, icon: '🏠', isActive: true, category: 'Nhà ở' },
   { id: 'rec-elec', name: 'Hóa đơn Điện, Nước & Rác', amount: 450000, jarId: 'nec', dayOfMonth: 10, icon: '⚡', isActive: true, category: 'Tiện ích' },
   { id: 'rec-wifi', name: 'Cước Internet Wi-Fi', amount: 200000, jarId: 'nec', dayOfMonth: 15, icon: '🌐', isActive: true, category: 'Viễn thông' },
+];
+
+export const INITIAL_SAVINGS_FUNDS: SavingsFund[] = [
+  {
+    id: 'fund-phone',
+    name: 'Mua điện thoại mới',
+    icon: '📱',
+    targetAmount: 18000000,
+    targetMonths: 6,
+    monthlyAmount: 3000000, // 18Tr / 6 tháng = 3Tr/tháng
+    currentSaved: 6000000,
+    walletId: 'bank',
+    createdAt: Date.now() - 60 * 86400000,
+    note: 'Khoản chi tích lũy tự động hàng tháng để đổi điện thoại sau 6 tháng',
+    isCompleted: false,
+  },
+  {
+    id: 'fund-emergency',
+    name: 'Quỹ khẩn cấp dự phòng',
+    icon: '🛡️',
+    targetAmount: 24000000,
+    targetMonths: 12,
+    monthlyAmount: 2000000, // 24Tr / 12 tháng = 2Tr/tháng
+    currentSaved: 8000000,
+    walletId: 'bank',
+    createdAt: Date.now() - 90 * 86400000,
+    note: 'Quỹ an toàn dự phòng 3-6 tháng chi phí sinh hoạt thiết yếu',
+    isCompleted: false,
+  },
 ];
 
 export const INITIAL_PROFILE: UserProfile = {

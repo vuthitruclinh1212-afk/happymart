@@ -65,7 +65,9 @@
         "note": { "type": "string", "maxLength": 500, "description": "Ghi chú hóa đơn" },
         "date": { "type": "string", "maxLength": 10, "description": "Ngày quét YYYY-MM-DD" },
         "workHours": { "type": "number", "description": "Giờ lao động tương ứng" },
-        "createdAt": { "type": "number", "description": "Timestamp tạo" }
+        "createdAt": { "type": "number", "description": "Timestamp tạo" },
+        "type": { "type": "string", "enum": ["expense", "income"], "description": "Loại giao dịch: chi tiêu hoặc thu nhập" },
+        "source": { "type": "string", "maxLength": 100, "description": "Nguồn thu nhập hoặc nguồn tiền" }
       },
       "required": ["id", "amount", "jarId", "walletId", "mood", "date"]
     },
@@ -147,6 +149,25 @@
         "createdAt": { "type": "number", "description": "Timestamp tạo" }
       },
       "required": ["id", "title", "artist"]
+    },
+    "SavingsFund": {
+      "title": "SavingsFund",
+      "description": "Quỹ tiết kiệm mục tiêu con với thời gian và số tiền chi hàng tháng tự động",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Mã quỹ tiết kiệm" },
+        "name": { "type": "string", "maxLength": 150, "description": "Tên quỹ (VD: Mua điện thoại, Quỹ khẩn cấp)" },
+        "icon": { "type": "string", "maxLength": 10, "description": "Biểu tượng quỹ" },
+        "targetAmount": { "type": "number", "description": "Giá tiền mục tiêu cần đạt" },
+        "targetMonths": { "type": "number", "description": "Thời gian tiết kiệm (số tháng)" },
+        "monthlyAmount": { "type": "number", "description": "Số tiền hệ thống tự động tính mỗi tháng phải bỏ" },
+        "currentSaved": { "type": "number", "description": "Số tiền đã tích lũy đến nay" },
+        "walletId": { "type": "string", "description": "Ví cất giữ tiền" },
+        "createdAt": { "type": "number", "description": "Timestamp tạo" },
+        "note": { "type": "string", "maxLength": 500, "description": "Ghi chú" },
+        "isCompleted": { "type": "boolean", "description": "Trạng thái hoàn thành" }
+      },
+      "required": ["id", "name", "targetAmount", "targetMonths", "monthlyAmount"]
     }
   },
   "firestore": {
@@ -185,6 +206,10 @@
     "/users/{userId}/songs/{songId}": {
       "schema": "FavoriteSong",
       "description": "Danh sách bài hát yêu thích trong quầy nhạc siêu thị của người dùng."
+    },
+    "/users/{userId}/savings_funds/{fundId}": {
+      "schema": "SavingsFund",
+      "description": "Danh sách các quỹ tiết kiệm con định kỳ hàng tháng của người dùng."
     }
   }
 }

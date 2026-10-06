@@ -18,6 +18,7 @@ import {
   RecurringExpense,
   UserProfile,
   FavoriteSong,
+  SavingsFund,
 } from './types';
 import {
   INITIAL_JARS,
@@ -30,6 +31,7 @@ import {
   INITIAL_RECURRING,
   INITIAL_PROFILE,
   INITIAL_SONGS,
+  INITIAL_SAVINGS_FUNDS,
   RANKS,
   loadStored,
   saveStored,
@@ -42,6 +44,7 @@ import {
   saveUserProfileToFirestore,
   saveSubDocument,
   deleteSubDocument,
+  getCanonicalUserId,
 } from './utils/firebaseSync';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -73,6 +76,8 @@ export default function App() {
   // Scanner initial prefill
   const [scanPrefillJar, setScanPrefillJar] = useState<string>('nec');
   const [scanPrefillSub, setScanPrefillSub] = useState<string>('Ăn sáng');
+  const [scanPrefillWalletId, setScanPrefillWalletId] = useState<string>('cash');
+  const [scanMode, setScanMode] = useState<'expense' | 'income'>('expense');
 
   // Primary application data synced with LocalStorage & Firestore
   const [hourlyWage, setHourlyWage] = useState<number>(() =>
@@ -123,6 +128,46 @@ export default function App() {
     loadStored<FavoriteSong[]>('hm_songs', INITIAL_SONGS)
   );
 
+  const [savingsFunds, setSavingsFunds] = useState<SavingsFund[]>(() =>
+    loadStored<SavingsFund[]>('hm_savings_funds', INITIAL_SAVINGS_FUNDS)
+  );
+
+  // Canonical User ID - Guarantees that any device logging in with the same email uses the exact same account
+  const activeUserId = useMemo(() => {
+    return currentUser ? getCanonicalUserId(currentUser) : null;
+  }, [currentUser]);
+
+  // Handler to reload full user data from cloud (cross-device sync)
+  const handleReloadCloudData = async () => {
+    if (!currentUser) return;
+    setIsSyncingCloud(true);
+    try {
+      const cloudData = await loadUserDataFromFirestore(currentUser);
+      if (cloudData) {
+        setUserProfile(cloudData.userProfile);
+        setHourlyWage(cloudData.hourlyWage);
+        setRolloverSavings(cloudData.rolloverSavings);
+        setJars(cloudData.jars);
+        setWallets(cloudData.wallets);
+        setTransactions(cloudData.transactions);
+        setRecurringExpenses(cloudData.recurringExpenses);
+        setWishlist(cloudData.wishlist);
+        setAssets(cloudData.assets);
+        setDiaryEntries(cloudData.diaryEntries);
+        if (cloudData.songs && cloudData.songs.length > 0) {
+          setSongs(cloudData.songs);
+        }
+        if (cloudData.savingsFunds && cloudData.savingsFunds.length > 0) {
+          setSavingsFunds(cloudData.savingsFunds);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to reload cloud data:', err);
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
   // Listen to Firebase Auth state to isolate user accounts
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -130,7 +175,7 @@ export default function App() {
       if (user) {
         setIsSyncingCloud(true);
         try {
-          const cloudData = await loadUserDataFromFirestore(user.uid);
+          const cloudData = await loadUserDataFromFirestore(user);
           if (cloudData) {
             setUserProfile(cloudData.userProfile);
             setHourlyWage(cloudData.hourlyWage);
@@ -144,6 +189,9 @@ export default function App() {
             setDiaryEntries(cloudData.diaryEntries);
             if (cloudData.songs && cloudData.songs.length > 0) {
               setSongs(cloudData.songs);
+            }
+            if (cloudData.savingsFunds && cloudData.savingsFunds.length > 0) {
+              setSavingsFunds(cloudData.savingsFunds);
             }
           }
         } catch (err) {
@@ -165,12 +213,28 @@ export default function App() {
         setDiaryEntries([]);
         setBadges(INITIAL_BADGES);
         setSongs(INITIAL_SONGS);
+        setSavingsFunds(INITIAL_SAVINGS_FUNDS);
         setIsSyncingCloud(false);
       }
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Auto-sync when returning to the app window/tab
+  useEffect(() => {
+    const handleFocusSync = () => {
+      if (currentUser && document.visibilityState === 'visible') {
+        handleReloadCloudData();
+      }
+    };
+    window.addEventListener('visibilitychange', handleFocusSync);
+    window.addEventListener('focus', handleFocusSync);
+    return () => {
+      window.removeEventListener('visibilitychange', handleFocusSync);
+      window.removeEventListener('focus', handleFocusSync);
+    };
+  }, [currentUser]);
 
   // Auto clean / fresh start reset if previous demo session had inflated data
   useEffect(() => {
@@ -206,6 +270,7 @@ export default function App() {
   useEffect(() => { saveStored('hm_diary', diaryEntries); }, [diaryEntries]);
   useEffect(() => { saveStored('hm_badges', badges); }, [badges]);
   useEffect(() => { saveStored('hm_songs', songs); }, [songs]);
+  useEffect(() => { saveStored('hm_savings_funds', savingsFunds); }, [savingsFunds]);
 
   // Dynamic user rank based on transaction counts
   const userRank: UserRank = useMemo(() => {
@@ -218,21 +283,35 @@ export default function App() {
     return RANKS[0];
   }, [transactions.length]);
 
-  // Total spent calculation for badge evaluations
+  // Total monthly auto-deduction from savings funds (MẶC ĐỊNH CHI ĐỂ TIẾT KIỆM)
+  const totalMonthlySavings = useMemo(() => {
+    return savingsFunds
+      .filter((f) => !f.isCompleted)
+      .reduce((sum, f) => sum + f.monthlyAmount, 0);
+  }, [savingsFunds]);
+
+  // Total spent calculation for badge evaluations (bao gồm cả khoản chi tự động trích tiết kiệm định kỳ)
   const totalBudget = useMemo(() => jars.reduce((sum, j) => sum + j.limit, 0), [jars]);
   const totalSpent = useMemo(
-    () => transactions.reduce((sum, t) => sum + Number(t.amount), 0),
+    () =>
+      transactions.filter((t) => t.type !== 'income').reduce((sum, t) => sum + Number(t.amount), 0) +
+      totalMonthlySavings,
+    [transactions, totalMonthlySavings]
+  );
+  const totalIncome = useMemo(
+    () => transactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0),
     [transactions]
   );
 
-  // Savings allocation ratio (LTSS + FFA)
+  // Savings allocation ratio (LTSS + FFA + Các quỹ tiết kiệm mục tiêu)
   const savingsJarProgress = useMemo(() => {
     const ltssLimit = jars.find((j) => j.id === 'ltss')?.limit || 1;
     const ffaLimit = jars.find((j) => j.id === 'ffa')?.limit || 1;
     const totalSavingsLimit = ltssLimit + ffaLimit;
-    const allocated = rolloverSavings + (wallets.find((w) => w.id === 'bank')?.balance || 0);
+    const totalCurrentSavings = savingsFunds.reduce((sum, f) => sum + f.currentSaved, 0);
+    const allocated = rolloverSavings + totalCurrentSavings + (wallets.find((w) => w.id === 'bank')?.balance || 0);
     return Math.min(100, Math.round((allocated / (totalSavingsLimit * 0.5)) * 50));
-  }, [jars, rolloverSavings, wallets]);
+  }, [jars, rolloverSavings, wallets, savingsFunds]);
 
   // Dynamic Badge achievement evaluation
   useEffect(() => {
@@ -346,26 +425,26 @@ export default function App() {
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
     const newProfile = { ...userProfile, ...updated };
     setUserProfile(newProfile);
-    if (currentUser) {
-      saveUserProfileToFirestore(currentUser.uid, newProfile, hourlyWage, rolloverSavings);
+    if (activeUserId) {
+      saveUserProfileToFirestore(activeUserId, newProfile, hourlyWage, rolloverSavings);
     }
   };
 
   const handleUpdateHourlyWage = (newWage: number) => {
     setHourlyWage(newWage);
-    if (currentUser) {
-      saveUserProfileToFirestore(currentUser.uid, userProfile, newWage, rolloverSavings);
+    if (activeUserId) {
+      saveUserProfileToFirestore(activeUserId, userProfile, newWage, rolloverSavings);
     }
   };
 
   const handleUpdateRolloverSavings = (newRollover: number) => {
     setRolloverSavings(newRollover);
-    if (currentUser) {
-      saveUserProfileToFirestore(currentUser.uid, userProfile, hourlyWage, newRollover);
+    if (activeUserId) {
+      saveUserProfileToFirestore(activeUserId, userProfile, hourlyWage, newRollover);
     }
   };
 
-  // Handler: Add new transaction
+  // Handler: Add new transaction (Support cả Thu Nhập & Chi Tiêu vào nguồn tiền chỉ định)
   const handleAddTransaction = (newTxData: {
     amount: number;
     jarId: string;
@@ -374,7 +453,10 @@ export default function App() {
     mood: MoodId;
     note: string;
     date: string;
+    type?: 'expense' | 'income';
+    source?: string;
   }) => {
+    const isIncome = newTxData.type === 'income';
     const workHours = Number((newTxData.amount / (hourlyWage || 1)).toFixed(1));
 
     const newTx: Transaction = {
@@ -388,54 +470,65 @@ export default function App() {
       date: newTxData.date,
       workHours,
       createdAt: Date.now(),
+      type: newTxData.type || 'expense',
+      source: newTxData.source,
     };
 
-    // Deduct balance from chosen wallet
+    // Update balance for chosen wallet: Thu nhập thì cộng tiền (+), Chi tiêu thì trừ tiền (-)
     setWallets((prev) =>
-      prev.map((w) =>
-        w.id === newTxData.walletId
-          ? { ...w, balance: Math.max(0, w.balance - newTxData.amount) }
-          : w
-      )
+      prev.map((w) => {
+        if (w.id === newTxData.walletId) {
+          const newBal = isIncome
+            ? w.balance + newTxData.amount
+            : Math.max(0, w.balance - newTxData.amount);
+          return { ...w, balance: newBal };
+        }
+        return w;
+      })
     );
 
     // Prepend transaction
     setTransactions((prev) => [newTx, ...prev]);
 
     // Save to user's isolated Firestore subcollections
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'transactions', newTx);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'transactions', newTx);
       const w = wallets.find((item) => item.id === newTxData.walletId);
       if (w) {
-        saveSubDocument(currentUser.uid, 'wallets', {
+        const newBal = isIncome
+          ? w.balance + newTxData.amount
+          : Math.max(0, w.balance - newTxData.amount);
+        saveSubDocument(activeUserId, 'wallets', {
           ...w,
-          balance: Math.max(0, w.balance - newTxData.amount),
+          balance: newBal,
         });
       }
     }
 
-    // Check if this transaction pushes the jar over 90% and trigger browser push notification if enabled
-    const targetJar = jars.find((j) => j.id === newTxData.jarId);
-    if (targetJar && targetJar.limit > 0) {
-      const priorSpent = transactions
-        .filter((t) => t.jarId === targetJar.id)
-        .reduce((sum, t) => sum + Number(t.amount), 0);
-      const newTotalSpent = priorSpent + newTxData.amount;
-      const ratio = newTotalSpent / targetJar.limit;
+    // Check if this transaction pushes the jar over 90% (chỉ áp dụng cho CHI TIÊU)
+    if (!isIncome) {
+      const targetJar = jars.find((j) => j.id === newTxData.jarId);
+      if (targetJar && targetJar.limit > 0) {
+        const priorSpent = transactions
+          .filter((t) => t.type !== 'income' && t.jarId === targetJar.id)
+          .reduce((sum, t) => sum + Number(t.amount), 0);
+        const newTotalSpent = priorSpent + newTxData.amount;
+        const ratio = newTotalSpent / targetJar.limit;
 
-      if (ratio >= 0.9) {
-        const pct = Math.round(ratio * 100);
-        if (
-          typeof window !== 'undefined' &&
-          'Notification' in window &&
-          Notification.permission === 'granted'
-        ) {
-          try {
-            new Notification('🚨 Happy Mart Fin - Cảnh Báo Chi Tiêu 90%!', {
-              body: `Hũ "${targetJar.name}" đã đạt ${pct}% hạn mức ngân sách! Hãy cân nhắc điều chỉnh kịp thời.`,
-            });
-          } catch (err) {
-            console.error('Notification error:', err);
+        if (ratio >= 0.9) {
+          const pct = Math.round(ratio * 100);
+          if (
+            typeof window !== 'undefined' &&
+            'Notification' in window &&
+            Notification.permission === 'granted'
+          ) {
+            try {
+              new Notification('🚨 Happy Mart Fin - Cảnh Báo Chi Tiêu 90%!', {
+                body: `Hũ "${targetJar.name}" đã đạt ${pct}% hạn mức ngân sách! Hãy cân nhắc điều chỉnh kịp thời.`,
+              });
+            } catch (err) {
+              console.error('Notification error:', err);
+            }
           }
         }
       }
@@ -451,40 +544,50 @@ export default function App() {
         lastActiveDate: todayStr,
       };
       setUserProfile(updatedProfile);
-      if (currentUser) {
-        saveUserProfileToFirestore(currentUser.uid, updatedProfile, hourlyWage, rolloverSavings);
+      if (activeUserId) {
+        saveUserProfileToFirestore(activeUserId, updatedProfile, hourlyWage, rolloverSavings);
       }
     }
   };
 
-  // Handler: Delete transaction (Refunds money back into wallet)
+  // Handler: Delete transaction (Hoàn trả tiền nếu xóa chi tiêu, hoặc trừ lại nếu xóa thu nhập)
   const handleDeleteTransaction = (id: string) => {
     const tx = transactions.find((t) => t.id === id);
     if (!tx) return;
 
-    // Refund wallet
+    const isIncome = tx.type === 'income';
+
     setWallets((prev) =>
-      prev.map((w) =>
-        w.id === tx.walletId ? { ...w, balance: w.balance + tx.amount } : w
-      )
+      prev.map((w) => {
+        if (w.id === tx.walletId) {
+          const newBal = isIncome
+            ? Math.max(0, w.balance - tx.amount)
+            : w.balance + tx.amount;
+          return { ...w, balance: newBal };
+        }
+        return w;
+      })
     );
 
     setTransactions((prev) => prev.filter((t) => t.id !== id));
 
     // Cloud sync
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'transactions', id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'transactions', id);
       const w = wallets.find((item) => item.id === tx.walletId);
       if (w) {
-        saveSubDocument(currentUser.uid, 'wallets', {
+        const newBal = isIncome
+          ? Math.max(0, w.balance - tx.amount)
+          : w.balance + tx.amount;
+        saveSubDocument(activeUserId, 'wallets', {
           ...w,
-          balance: w.balance + tx.amount,
+          balance: newBal,
         });
       }
     }
   };
 
-  // Handler: Edit transaction (Adjusts wallet differences and updates data)
+  // Handler: Edit transaction (Điều chỉnh chênh lệch số dư ví tương ứng)
   const handleEditTransaction = (updatedTx: Transaction) => {
     const oldTx = transactions.find((t) => t.id === updatedTx.id);
     if (!oldTx) return;
@@ -492,22 +595,22 @@ export default function App() {
     const newWorkHours = Number((updatedTx.amount / (hourlyWage || 1)).toFixed(1));
     const finalTx: Transaction = { ...updatedTx, workHours: newWorkHours };
 
+    const oldIsIncome = oldTx.type === 'income';
+    const newIsIncome = updatedTx.type === 'income';
+
     // Adjust wallet balances
     setWallets((prev) =>
       prev.map((w) => {
-        // If same wallet: adjust difference
-        if (w.id === oldTx.walletId && w.id === updatedTx.walletId) {
-          const diff = updatedTx.amount - oldTx.amount;
-          return { ...w, balance: Math.max(0, w.balance - diff) };
-        }
-        // If wallet changed: refund old, deduct new
+        let bal = w.balance;
+        // Revert old effect
         if (w.id === oldTx.walletId) {
-          return { ...w, balance: w.balance + oldTx.amount };
+          bal = oldIsIncome ? Math.max(0, bal - oldTx.amount) : bal + oldTx.amount;
         }
+        // Apply new effect
         if (w.id === updatedTx.walletId) {
-          return { ...w, balance: Math.max(0, w.balance - updatedTx.amount) };
+          bal = newIsIncome ? bal + updatedTx.amount : Math.max(0, bal - updatedTx.amount);
         }
-        return w;
+        return { ...w, balance: Math.max(0, bal) };
       })
     );
 
@@ -515,8 +618,18 @@ export default function App() {
       prev.map((t) => (t.id === updatedTx.id ? finalTx : t))
     );
 
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'transactions', finalTx);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'transactions', finalTx);
+      wallets.forEach((w) => {
+        let bal = w.balance;
+        if (w.id === oldTx.walletId) {
+          bal = oldIsIncome ? Math.max(0, bal - oldTx.amount) : bal + oldTx.amount;
+        }
+        if (w.id === updatedTx.walletId) {
+          bal = newIsIncome ? bal + updatedTx.amount : Math.max(0, bal - updatedTx.amount);
+        }
+        saveSubDocument(activeUserId, 'wallets', { ...w, balance: Math.max(0, bal) });
+      });
     }
   };
 
@@ -529,8 +642,8 @@ export default function App() {
       id: `rec-${Date.now()}`,
     };
     setRecurringExpenses((prev) => [...prev, newRec]);
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'recurring', newRec);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'recurring', newRec);
     }
   };
 
@@ -539,8 +652,8 @@ export default function App() {
       prev.map((r) => {
         if (r.id === id) {
           const updated = { ...r, isActive: !r.isActive };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'recurring', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'recurring', updated);
           }
           return updated;
         }
@@ -551,8 +664,8 @@ export default function App() {
 
   const handleDeleteRecurringExpense = (id: string) => {
     setRecurringExpenses((prev) => prev.filter((r) => r.id !== id));
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'recurring', id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'recurring', id);
     }
   };
 
@@ -560,6 +673,14 @@ export default function App() {
   const handleSelectSubcategoryForScan = (jarId: string, subCategory: string) => {
     setScanPrefillJar(jarId);
     setScanPrefillSub(subCategory);
+    setScanMode('expense');
+    setTab('scanner');
+  };
+
+  // Handler: Navigate to scanner in Income mode (with optional prefilled wallet)
+  const handleNavigateToIncome = (walletId?: string) => {
+    if (walletId) setScanPrefillWalletId(walletId);
+    setScanMode('income');
     setTab('scanner');
   };
 
@@ -569,8 +690,8 @@ export default function App() {
       prev.map((j) => {
         if (j.id === jarId) {
           const updated = { ...j, limit: newLimit };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'jars', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'jars', updated);
           }
           return updated;
         }
@@ -585,8 +706,8 @@ export default function App() {
       prev.map((j) => {
         if (j.id === jarId && !j.subs.includes(subName)) {
           const updated = { ...j, subs: [...j.subs, subName] };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'jars', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'jars', updated);
           }
           return updated;
         }
@@ -607,8 +728,8 @@ export default function App() {
       targetAchieved: false,
     };
     setWishlist((prev) => [newItem, ...prev]);
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'wishlist', newItem);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'wishlist', newItem);
     }
   };
 
@@ -622,8 +743,8 @@ export default function App() {
             daysPassed: nextDays,
             targetAchieved: nextDays >= w.daysPlanned,
           };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'wishlist', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'wishlist', updated);
           }
           return updated;
         }
@@ -645,8 +766,8 @@ export default function App() {
     });
 
     setWishlist((prev) => prev.filter((w) => w.id !== item.id));
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'wishlist', item.id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'wishlist', item.id);
     }
     alert(`Đã hoàn tất thanh toán món "${item.name}"! Bạn đã kiên nhẫn đủ thời gian cần thiết! 🛒`);
   };
@@ -662,17 +783,17 @@ export default function App() {
     };
     setDiaryEntries((prev) => [entry, ...prev]);
     setWishlist((prev) => prev.filter((w) => w.id !== item.id));
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'diary', entry);
-      deleteSubDocument(currentUser.uid, 'wishlist', item.id);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'diary', entry);
+      deleteSubDocument(activeUserId, 'wishlist', item.id);
     }
     alert(`Chúc mừng bạn! Bạn đã giữ lại được ${item.price.toLocaleString('vi-VN')} đ vào túi thay vì tiêu bốc đồng! 🐷🎉`);
   };
 
   const handleDeleteWishlistItem = (id: string) => {
     setWishlist((prev) => prev.filter((w) => w.id !== id));
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'wishlist', id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'wishlist', id);
     }
   };
 
@@ -684,8 +805,8 @@ export default function App() {
       createdAt: Date.now(),
     };
     setSongs((prev) => [newSong, ...prev]);
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'songs', newSong);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'songs', newSong);
     }
   };
 
@@ -694,8 +815,8 @@ export default function App() {
       prev.map((s) => {
         if (s.id === id) {
           const updated = { ...s, ...updatedFields };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'songs', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'songs', updated);
           }
           return updated;
         }
@@ -709,8 +830,8 @@ export default function App() {
       prev.map((s) => {
         if (s.id === id) {
           const updated = { ...s, isFavorite: !s.isFavorite };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'songs', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'songs', updated);
           }
           return updated;
         }
@@ -721,8 +842,8 @@ export default function App() {
 
   const handleDeleteSong = (id: string) => {
     setSongs((prev) => prev.filter((s) => s.id !== id));
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'songs', id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'songs', id);
     }
   };
 
@@ -733,8 +854,8 @@ export default function App() {
       id: `asset-${Date.now()}`,
     };
     setAssets((prev) => [newAsset, ...prev]);
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'assets', newAsset);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'assets', newAsset);
     }
   };
 
@@ -743,8 +864,8 @@ export default function App() {
       prev.map((a) => {
         if (a.id === id) {
           const updated = { ...a, daysUsed: a.daysUsed + days };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'assets', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'assets', updated);
           }
           return updated;
         }
@@ -755,8 +876,8 @@ export default function App() {
 
   const handleDeleteAsset = (id: string) => {
     setAssets((prev) => prev.filter((a) => a.id !== id));
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'assets', id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'assets', id);
     }
   };
 
@@ -767,8 +888,8 @@ export default function App() {
       id: `diary-${Date.now()}`,
     };
     setDiaryEntries((prev) => [newEntry, ...prev]);
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'diary', newEntry);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'diary', newEntry);
     }
 
     // Check streak update
@@ -781,16 +902,16 @@ export default function App() {
         lastActiveDate: todayStr,
       };
       setUserProfile(updatedProfile);
-      if (currentUser) {
-        saveUserProfileToFirestore(currentUser.uid, updatedProfile, hourlyWage, rolloverSavings);
+      if (activeUserId) {
+        saveUserProfileToFirestore(activeUserId, updatedProfile, hourlyWage, rolloverSavings);
       }
     }
   };
 
   const handleDeleteDiaryEntry = (id: string) => {
     setDiaryEntries((prev) => prev.filter((d) => d.id !== id));
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'diary', id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'diary', id);
     }
   };
 
@@ -800,8 +921,8 @@ export default function App() {
       prev.map((w) => {
         if (w.id === id) {
           const updated = { ...w, balance: newBalance };
-          if (currentUser) {
-            saveSubDocument(currentUser.uid, 'wallets', updated);
+          if (activeUserId) {
+            saveSubDocument(activeUserId, 'wallets', updated);
           }
           return updated;
         }
@@ -818,15 +939,61 @@ export default function App() {
       icon: icon || '💳',
     };
     setWallets((prev) => [...prev, newW]);
-    if (currentUser) {
-      saveSubDocument(currentUser.uid, 'wallets', newW);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'wallets', newW);
     }
   };
 
   const handleDeleteWallet = (id: string) => {
     setWallets((prev) => prev.filter((w) => w.id !== id));
-    if (currentUser) {
-      deleteSubDocument(currentUser.uid, 'wallets', id);
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'wallets', id);
+    }
+  };
+
+  // Handlers: Savings Funds (Quỹ tiết kiệm mục tiêu con - Tự động trích định kỳ hàng tháng)
+  const handleAddSavingsFund = (fundData: Omit<SavingsFund, 'id' | 'createdAt'>) => {
+    const newFund: SavingsFund = {
+      ...fundData,
+      id: `fund-${Date.now()}`,
+      createdAt: Date.now(),
+    };
+    setSavingsFunds((prev) => [newFund, ...prev]);
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'savings_funds', newFund);
+    }
+  };
+
+  const handleUpdateSavingsFund = (updatedFund: SavingsFund) => {
+    setSavingsFunds((prev) =>
+      prev.map((f) => (f.id === updatedFund.id ? updatedFund : f))
+    );
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'savings_funds', updatedFund);
+    }
+  };
+
+  const handleDeleteSavingsFund = (id: string) => {
+    setSavingsFunds((prev) => prev.filter((f) => f.id !== id));
+    if (activeUserId) {
+      deleteSubDocument(activeUserId, 'savings_funds', id);
+    }
+  };
+
+  const handleDepositSavingsFund = (fundId: string, amount: number) => {
+    const fund = savingsFunds.find((f) => f.id === fundId);
+    if (!fund) return;
+    const newSaved = fund.currentSaved + amount;
+    const updated: SavingsFund = {
+      ...fund,
+      currentSaved: newSaved,
+      isCompleted: newSaved >= fund.targetAmount,
+    };
+    setSavingsFunds((prev) =>
+      prev.map((f) => (f.id === fundId ? updated : f))
+    );
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'savings_funds', updated);
     }
   };
 
@@ -844,6 +1011,8 @@ export default function App() {
       assets,
       diaryEntries,
       badges,
+      songs,
+      savingsFunds,
       exportedAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -870,6 +1039,8 @@ export default function App() {
     if (data.assets) setAssets(data.assets);
     if (data.diaryEntries) setDiaryEntries(data.diaryEntries);
     if (data.badges) setBadges(data.badges);
+    if (data.songs) setSongs(data.songs);
+    if (data.savingsFunds) setSavingsFunds(data.savingsFunds);
   };
 
   const handleResetAllData = () => {
@@ -884,6 +1055,8 @@ export default function App() {
     setAssets(INITIAL_ASSETS);
     setDiaryEntries(INITIAL_DIARY);
     setBadges(INITIAL_BADGES);
+    setSongs(INITIAL_SONGS);
+    setSavingsFunds(INITIAL_SAVINGS_FUNDS);
     alert('Đã khôi phục toàn bộ dữ liệu về mặc định ban đầu!');
   };
 
@@ -893,7 +1066,7 @@ export default function App() {
     const jarSpentMap: Record<string, number> = {};
     jars.forEach((j) => (jarSpentMap[j.id] = 0));
     transactions.forEach((t) => {
-      if (jarSpentMap[t.jarId] !== undefined) {
+      if (t.type !== 'income' && jarSpentMap[t.jarId] !== undefined) {
         jarSpentMap[t.jarId] += Number(t.amount);
       }
     });
@@ -987,12 +1160,18 @@ export default function App() {
             jars={jars}
             wallets={wallets}
             transactions={transactions}
+            savingsFunds={savingsFunds}
             rolloverSavings={rolloverSavings}
             setRolloverSavings={handleUpdateRolloverSavings}
             hourlyWage={hourlyWage}
             onSelectSubcategoryForScan={handleSelectSubcategoryForScan}
+            onNavigateToIncome={handleNavigateToIncome}
             onUpdateJarLimit={handleUpdateJarLimit}
             onAddSubCategory={handleAddSubCategory}
+            onAddSavingsFund={handleAddSavingsFund}
+            onUpdateSavingsFund={handleUpdateSavingsFund}
+            onDeleteSavingsFund={handleDeleteSavingsFund}
+            onDepositSavingsFund={handleDepositSavingsFund}
           />
         )}
 
@@ -1004,6 +1183,9 @@ export default function App() {
             hourlyWage={hourlyWage}
             initialJarId={scanPrefillJar}
             initialSubCategory={scanPrefillSub}
+            initialWalletId={scanPrefillWalletId}
+            initialMode={scanMode}
+            onModeChange={setScanMode}
             onAddTransaction={handleAddTransaction}
           />
         )}
@@ -1024,6 +1206,7 @@ export default function App() {
             onToggleRecurringExpense={handleToggleRecurringExpense}
             onDeleteRecurringExpense={handleDeleteRecurringExpense}
             transactions={transactions}
+            savingsFunds={savingsFunds}
             rolloverSavings={rolloverSavings}
           />
         )}

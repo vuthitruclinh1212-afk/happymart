@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Jar, Wallet, RecurringExpense, ScenarioType, ForecastMonthData, Transaction } from '../types';
+import { Jar, Wallet, RecurringExpense, ScenarioType, ForecastMonthData, Transaction, SavingsFund } from '../types';
 import {
   TrendingUp,
   TrendingDown,
@@ -28,6 +28,7 @@ interface FinancialForecastProps {
   wallets: Wallet[];
   recurringExpenses: RecurringExpense[];
   transactions: Transaction[];
+  savingsFunds?: SavingsFund[];
   onAddRecurringExpense: (expense: Omit<RecurringExpense, 'id'>) => void;
   onToggleRecurringExpense: (id: string) => void;
   onDeleteRecurringExpense: (id: string) => void;
@@ -43,6 +44,7 @@ export const FinancialForecast: React.FC<FinancialForecastProps> = ({
   wallets,
   recurringExpenses,
   transactions,
+  savingsFunds = [],
   onAddRecurringExpense,
   onToggleRecurringExpense,
   onDeleteRecurringExpense,
@@ -71,12 +73,15 @@ export const FinancialForecast: React.FC<FinancialForecastProps> = ({
       .reduce((sum, r) => sum + r.amount, 0);
   }, [recurringExpenses]);
 
-  // Savings allocation targets (LTSS + FFA)
+  // Savings allocation targets (LTSS + FFA hoặc tổng các quỹ tiết kiệm con tự động)
   const monthlySavingsTarget = useMemo(() => {
     const ltss = jars.find((j) => j.id === 'ltss')?.limit || 0;
     const ffa = jars.find((j) => j.id === 'ffa')?.limit || 0;
-    return ltss + ffa;
-  }, [jars]);
+    const autoFundsSavings = savingsFunds
+      .filter((f) => !f.isCompleted)
+      .reduce((sum, f) => sum + f.monthlyAmount, 0);
+    return Math.max(ltss, autoFundsSavings) + ffa;
+  }, [jars, savingsFunds]);
 
   // Other variable spending targets (NEC excluding recurring + PLAY + EDU + GIVE)
   const baseVariableBudget = useMemo(() => {
@@ -94,9 +99,10 @@ export const FinancialForecast: React.FC<FinancialForecastProps> = ({
     return necVariable + play + edu + give;
   }, [jars, recurringExpenses]);
 
-  // Actual Historical Spending Rate from transactions
+  // Actual Historical Spending Rate from transactions (chỉ tính chi tiêu)
   const historicalSpendingVelocity = useMemo(() => {
-    if (transactions.length === 0) {
+    const expenseTxs = transactions.filter((t) => t.type !== 'income');
+    if (expenseTxs.length === 0) {
       return {
         totalHistoricalSpent: 0,
         monthlyRate: baseVariableBudget,
@@ -106,9 +112,9 @@ export const FinancialForecast: React.FC<FinancialForecastProps> = ({
       };
     }
 
-    const totalSpent = transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+    const totalSpent = expenseTxs.reduce((sum, t) => sum + Number(t.amount), 0);
     // Find unique days or date range
-    const uniqueDays = new Set(transactions.map((t) => t.date)).size;
+    const uniqueDays = new Set(expenseTxs.map((t) => t.date)).size;
     const effectiveDays = Math.max(1, uniqueDays);
     const dailyRate = Math.round(totalSpent / effectiveDays);
     const estimatedMonthly = Math.round(dailyRate * 30);
@@ -118,7 +124,7 @@ export const FinancialForecast: React.FC<FinancialForecastProps> = ({
       monthlyRate: estimatedMonthly > 0 ? estimatedMonthly : baseVariableBudget,
       dailyRate,
       hasHistory: true,
-      txCount: transactions.length,
+      txCount: expenseTxs.length,
     };
   }, [transactions, baseVariableBudget]);
 

@@ -154,10 +154,10 @@ export default function App() {
         setWishlist(cloudData.wishlist);
         setAssets(cloudData.assets);
         setDiaryEntries(cloudData.diaryEntries);
-        if (cloudData.songs && cloudData.songs.length > 0) {
+        if (cloudData.songs) {
           setSongs(cloudData.songs);
         }
-        if (cloudData.savingsFunds && cloudData.savingsFunds.length > 0) {
+        if (cloudData.savingsFunds) {
           setSavingsFunds(cloudData.savingsFunds);
         }
       }
@@ -187,10 +187,10 @@ export default function App() {
             setWishlist(cloudData.wishlist);
             setAssets(cloudData.assets);
             setDiaryEntries(cloudData.diaryEntries);
-            if (cloudData.songs && cloudData.songs.length > 0) {
+            if (cloudData.songs) {
               setSongs(cloudData.songs);
             }
-            if (cloudData.savingsFunds && cloudData.savingsFunds.length > 0) {
+            if (cloudData.savingsFunds) {
               setSavingsFunds(cloudData.savingsFunds);
             }
           }
@@ -235,21 +235,6 @@ export default function App() {
       window.removeEventListener('focus', handleFocusSync);
     };
   }, [currentUser]);
-
-  // Auto clean / fresh start reset if previous demo session had inflated data
-  useEffect(() => {
-    if (localStorage.getItem('hm_clean_fresh_v3') !== 'true') {
-      setWallets(INITIAL_WALLETS);
-      setTransactions([]);
-      setWishlist([]);
-      setAssets([]);
-      setDiaryEntries([]);
-      setRolloverSavings(0);
-      setUserProfile(INITIAL_PROFILE);
-      setBadges(INITIAL_BADGES);
-      localStorage.setItem('hm_clean_fresh_v3', 'true');
-    }
-  }, []);
 
   // Sync Audio state
   const handleSetMuted = (muted: boolean) => {

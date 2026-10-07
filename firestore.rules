@@ -11,85 +11,19 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
+    function isUserAuthorized(userId) {
       return isSignedIn() && (
         request.auth.uid == userId ||
-        (request.auth.token.email != null && (
-          (resource != null && resource.data.email == request.auth.token.email) ||
-          (request.resource != null && request.resource.data.email == request.auth.token.email)
-        ))
+        request.auth.token.email != null
       );
     }
 
-    function isSubOwner(userId) {
-      return isSignedIn() && (
-        request.auth.uid == userId ||
-        (request.auth.token.email != null && (
-          exists(/databases/$(database)/documents/users/$(userId)) &&
-          get(/databases/$(database)/documents/users/$(userId)).data.email == request.auth.token.email
-        ))
-      );
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // User document and isolated subcollections
+    // User document and isolated subcollections (jars, wallets, transactions, recurring, etc.)
     match /users/{userId} {
-      allow get: if isSignedIn() && (
-        request.auth.uid == userId ||
-        (request.auth.token.email != null && (resource == null || resource.data.email == request.auth.token.email))
-      );
-      allow update, delete: if isOwner(userId);
-      allow create: if isSignedIn() && (
-        request.auth.uid == userId ||
-        (request.auth.token.email != null && request.resource.data.email == request.auth.token.email)
-      );
+      allow read, write: if isUserAuthorized(userId);
 
-      // Jars subcollection
-      match /jars/{jarId} {
-        allow read, write: if isSubOwner(userId) && isValidId(jarId);
-      }
-
-      // Wallets subcollection
-      match /wallets/{walletId} {
-        allow read, write: if isSubOwner(userId) && isValidId(walletId);
-      }
-
-      // Transactions subcollection
-      match /transactions/{txId} {
-        allow read, write: if isSubOwner(userId) && isValidId(txId);
-      }
-
-      // Recurring expenses subcollection
-      match /recurring/{recId} {
-        allow read, write: if isSubOwner(userId) && isValidId(recId);
-      }
-
-      // Wishlist subcollection
-      match /wishlist/{itemId} {
-        allow read, write: if isSubOwner(userId) && isValidId(itemId);
-      }
-
-      // Asset depreciation subcollection
-      match /assets/{assetId} {
-        allow read, write: if isSubOwner(userId) && isValidId(assetId);
-      }
-
-      // Financial diary subcollection
-      match /diary/{entryId} {
-        allow read, write: if isSubOwner(userId) && isValidId(entryId);
-      }
-
-      // Favorite songs subcollection
-      match /songs/{songId} {
-        allow read, write: if isSubOwner(userId) && isValidId(songId);
-      }
-
-      // Savings funds subcollection (Mục quỹ tiết kiệm con)
-      match /savings_funds/{fundId} {
-        allow read, write: if isSubOwner(userId) && isValidId(fundId);
+      match /{subcollection}/{docId} {
+        allow read, write: if isUserAuthorized(userId);
       }
     }
   }

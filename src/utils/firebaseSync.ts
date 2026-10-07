@@ -64,8 +64,9 @@ export function getCanonicalUserId(userOrUid: string | { uid: string; email?: st
 
 /**
  * Loads all data for a specific user ID from Firestore.
- * If user doc doesn't exist, initializes fresh defaults for this user.
- * Guarantees cross-device sync for the same email!
+ * Always resolves document ID based on normalized email (e.g. u_vuongnguyet65_gmail_com).
+ * Fetches all subcollections (jars, wallets, transactions, recurring, etc.).
+ * Strictly NEVER overwrites existing data with empty defaults!
  */
 export async function loadUserDataFromFirestore(
   userParam: string | { uid: string; email?: string | null; displayName?: string | null }
@@ -75,86 +76,40 @@ export async function loadUserDataFromFirestore(
     ? { uid: userParam, email: currentUser?.email || '', displayName: currentUser?.displayName || '' }
     : userParam;
 
-  const canonicalId = getCanonicalUserId(userObj);
+  const email = (userObj.email || currentUser?.email || '').trim().toLowerCase();
+  const canonicalId = getCanonicalUserId({ uid: userObj.uid, email });
   const userDocPath = `users/${canonicalId}`;
 
   try {
+    // 1. Try to find user document by canonicalId (e.g. u_vuongnguyet65_gmail_com)
+    let sourceId = canonicalId;
     let userDocRef = doc(db, 'users', canonicalId);
     let userSnap = await getDoc(userDocRef);
 
-    // If canonical doc doesn't exist yet, check if there's legacy data under user.uid
-    let sourceId = canonicalId;
+    // Fallback 1: check if raw email without prefix was used
+    if (!userSnap.exists() && email) {
+      const emailDocRef = doc(db, 'users', email);
+      const emailSnap = await getDoc(emailDocRef);
+      if (emailSnap.exists()) {
+        userDocRef = emailDocRef;
+        userSnap = emailSnap;
+        sourceId = email;
+      }
+    }
+
+    // Fallback 2: check if Firebase UID was used
     if (!userSnap.exists() && userObj.uid && userObj.uid !== canonicalId) {
       const legacyRef = doc(db, 'users', userObj.uid);
       const legacySnap = await getDoc(legacyRef);
       if (legacySnap.exists()) {
+        userDocRef = legacyRef;
         userSnap = legacySnap;
         sourceId = userObj.uid;
       }
     }
 
-    if (!userSnap.exists()) {
-      // First-time user for this email: initialize their profile and isolated subcollections
-      const email = userObj.email || currentUser?.email || '';
-      const emailPrefix = email ? email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() : '';
-      const memberCode = emailPrefix ? `HM-${emailPrefix}` : `HM-${canonicalId.slice(0, 6).toUpperCase()}`;
-
-      const initialProfile: UserProfile = {
-        uid: canonicalId,
-        email: email,
-        name: userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Mới'),
-        avatar: '🥑',
-        memberId: memberCode,
-        joinedDate: new Date().toLocaleDateString('vi-VN'),
-        monthlyWorkHours: 160,
-        currentStreakDays: 1,
-        longestStreakDays: 1,
-        lastActiveDate: new Date().toISOString().split('T')[0],
-      };
-
-      const initialData: FullUserData = {
-        userProfile: initialProfile,
-        hourlyWage: 50000,
-        rolloverSavings: 1200000,
-        jars: INITIAL_JARS,
-        wallets: INITIAL_WALLETS,
-        transactions: [],
-        recurringExpenses: INITIAL_RECURRING,
-        wishlist: [],
-        assets: [],
-        diaryEntries: [],
-        songs: INITIAL_SONGS,
-        savingsFunds: INITIAL_SAVINGS_FUNDS,
-        canonicalId,
-      };
-
-      // Save initial state to Firestore under canonicalId
-      await saveFullUserDataToFirestore(canonicalId, initialData);
-      return initialData;
-    }
-
-    const userData = userSnap.data();
-    const email = userData.email || userObj.email || auth.currentUser?.email || '';
-    const emailPrefix = email ? email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() : '';
-    const memberCode = userData.memberId || (emailPrefix ? `HM-${emailPrefix}` : `HM-${canonicalId.slice(0, 6).toUpperCase()}`);
-
-    const userProfile: UserProfile = {
-      uid: canonicalId,
-      email: email,
-      name: userData.displayName || userObj.displayName || auth.currentUser?.displayName || 'Thành Viên Siêu Thị',
-      avatar: userData.avatar || '🥑',
-      memberId: memberCode,
-      joinedDate: userData.joinedDate || new Date().toLocaleDateString('vi-VN'),
-      monthlyWorkHours: Number(userData.monthlyWorkHours) || 160,
-      currentStreakDays: Number(userData.currentStreakDays) || 1,
-      longestStreakDays: Number(userData.longestStreakDays) || 1,
-      lastActiveDate: userData.lastActiveDate || new Date().toISOString().split('T')[0],
-    };
-
-    const hourlyWage = Number(userData.hourlyWage) || 50000;
-    const rolloverSavings = Number(userData.rolloverSavings) || 0;
-
-    // Fetch subcollections from sourceId (or canonicalId)
+    // 2. Fetch all subcollections from sourceId (or canonicalId)
+    // Run queries safely
     const [
       jarsSnap,
       walletsSnap,
@@ -166,56 +121,161 @@ export async function loadUserDataFromFirestore(
       songsSnap,
       savingsSnap,
     ] = await Promise.all([
-      getDocs(collection(db, 'users', sourceId, 'jars')),
-      getDocs(collection(db, 'users', sourceId, 'wallets')),
-      getDocs(collection(db, 'users', sourceId, 'transactions')),
-      getDocs(collection(db, 'users', sourceId, 'recurring')),
-      getDocs(collection(db, 'users', sourceId, 'wishlist')),
-      getDocs(collection(db, 'users', sourceId, 'assets')),
-      getDocs(collection(db, 'users', sourceId, 'diary')),
-      getDocs(collection(db, 'users', sourceId, 'songs')),
-      getDocs(collection(db, 'users', sourceId, 'savings_funds')),
+      getDocs(collection(db, 'users', sourceId, 'jars')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'wallets')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'transactions')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'recurring')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'wishlist')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'assets')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'diary')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'songs')).catch(() => ({ docs: [] } as any)),
+      getDocs(collection(db, 'users', sourceId, 'savings_funds')).catch(() => ({ docs: [] } as any)),
     ]);
 
-    const jars = jarsSnap.docs.map((d) => d.data() as Jar);
-    const wallets = walletsSnap.docs.map((d) => d.data() as Wallet);
-    const transactions = txsSnap.docs.map((d) => d.data() as Transaction);
-    const recurringExpenses = recSnap.docs.map((d) => d.data() as RecurringExpense);
-    const wishlist = wishSnap.docs.map((d) => d.data() as WishlistItem);
-    const assets = assetsSnap.docs.map((d) => d.data() as AssetDepreciation);
-    const diaryEntries = diarySnap.docs.map((d) => d.data() as DiaryEntry);
-    const songs = songsSnap.docs.map((d) => d.data() as FavoriteSong);
-    const savingsFunds = savingsSnap.docs.map((d) => d.data() as SavingsFund);
+    const jars: Jar[] = jarsSnap.docs.map((d: any) => d.data() as Jar);
+    const wallets: Wallet[] = walletsSnap.docs.map((d: any) => d.data() as Wallet);
+    const transactions: Transaction[] = txsSnap.docs.map((d: any) => d.data() as Transaction);
+    const recurringExpenses: RecurringExpense[] = recSnap.docs.map((d: any) => d.data() as RecurringExpense);
+    const wishlist: WishlistItem[] = wishSnap.docs.map((d: any) => d.data() as WishlistItem);
+    const assets: AssetDepreciation[] = assetsSnap.docs.map((d: any) => d.data() as AssetDepreciation);
+    const diaryEntries: DiaryEntry[] = diarySnap.docs.map((d: any) => d.data() as DiaryEntry);
+    const songs: FavoriteSong[] = songsSnap.docs.map((d: any) => d.data() as FavoriteSong);
+    const savingsFunds: SavingsFund[] = savingsSnap.docs.map((d: any) => d.data() as SavingsFund);
 
     // Sort transactions by date/createdAt desc
-    transactions.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    transactions.sort((a: Transaction, b: Transaction) => (b.createdAt || 0) - (a.createdAt || 0));
 
-    const resultData: FullUserData = {
-      userProfile,
-      hourlyWage,
-      rolloverSavings,
-      jars: jars.length > 0 ? jars : INITIAL_JARS,
-      wallets: wallets.length > 0 ? wallets : INITIAL_WALLETS,
-      transactions,
-      recurringExpenses: recurringExpenses.length > 0 ? recurringExpenses : INITIAL_RECURRING,
-      wishlist,
-      assets,
-      diaryEntries,
-      songs: songs.length > 0 ? songs : INITIAL_SONGS,
-      savingsFunds: savingsFunds.length > 0 ? savingsFunds : INITIAL_SAVINGS_FUNDS,
+    const emailPrefix = email ? email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() : '';
+    const memberCode = emailPrefix ? `HM-${emailPrefix}` : `HM-${canonicalId.slice(0, 6).toUpperCase()}`;
+
+    // 3. If the user document exists, extract stored profile
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      const userProfile: UserProfile = {
+        uid: canonicalId,
+        email: userData.email || email,
+        name: userData.displayName || userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Siêu Thị'),
+        avatar: userData.avatar || '🥑',
+        memberId: userData.memberId || memberCode,
+        joinedDate: userData.joinedDate || new Date().toLocaleDateString('vi-VN'),
+        monthlyWorkHours: Number(userData.monthlyWorkHours) || 160,
+        currentStreakDays: Number(userData.currentStreakDays) || 1,
+        longestStreakDays: Number(userData.longestStreakDays) || 1,
+        lastActiveDate: userData.lastActiveDate || new Date().toISOString().split('T')[0],
+      };
+
+      const hourlyWage = Number(userData.hourlyWage) || 50000;
+      const rolloverSavings = Number(userData.rolloverSavings) || 0;
+
+      const resultData: FullUserData = {
+        userProfile,
+        hourlyWage,
+        rolloverSavings,
+        jars: jars.length > 0 ? jars : INITIAL_JARS,
+        wallets: wallets.length > 0 ? wallets : INITIAL_WALLETS,
+        transactions, // Keep ALL loaded transactions, never overwrite
+        recurringExpenses: recurringExpenses.length > 0 ? recurringExpenses : INITIAL_RECURRING,
+        wishlist,
+        assets,
+        diaryEntries,
+        songs: songs.length > 0 ? songs : INITIAL_SONGS,
+        savingsFunds: savingsFunds.length > 0 ? savingsFunds : INITIAL_SAVINGS_FUNDS,
+        canonicalId,
+      };
+
+      console.log(`[firebaseSync] Loaded existing user data for ${canonicalId}:`, {
+        transactionsCount: transactions.length,
+        jarsCount: jars.length,
+        walletsCount: wallets.length,
+        recurringCount: recurringExpenses.length,
+      });
+
+      return resultData;
+    }
+
+    // 4. Case where userSnap does NOT exist, but subcollections DO exist
+    const hasExistingSubcollections = jars.length > 0 || wallets.length > 0 || transactions.length > 0;
+    if (hasExistingSubcollections) {
+      const recoveredProfile: UserProfile = {
+        uid: canonicalId,
+        email: email,
+        name: userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Siêu Thị'),
+        avatar: '🥑',
+        memberId: memberCode,
+        joinedDate: new Date().toLocaleDateString('vi-VN'),
+        monthlyWorkHours: 160,
+        currentStreakDays: 1,
+        longestStreakDays: 1,
+        lastActiveDate: new Date().toISOString().split('T')[0],
+      };
+
+      // Create root user document so it exists for next time, but DO NOT overwrite subcollections
+      await setDoc(doc(db, 'users', canonicalId), {
+        uid: canonicalId,
+        email,
+        displayName: recoveredProfile.name,
+        avatar: recoveredProfile.avatar,
+        memberId: memberCode,
+        joinedDate: recoveredProfile.joinedDate,
+        monthlyWorkHours: 160,
+        currentStreakDays: 1,
+        longestStreakDays: 1,
+        lastActiveDate: recoveredProfile.lastActiveDate,
+        hourlyWage: 50000,
+        rolloverSavings: 0,
+        updatedAt: Date.now(),
+      }, { merge: true });
+
+      return {
+        userProfile: recoveredProfile,
+        hourlyWage: 50000,
+        rolloverSavings: 0,
+        jars: jars.length > 0 ? jars : INITIAL_JARS,
+        wallets: wallets.length > 0 ? wallets : INITIAL_WALLETS,
+        transactions,
+        recurringExpenses: recurringExpenses.length > 0 ? recurringExpenses : INITIAL_RECURRING,
+        wishlist,
+        assets,
+        diaryEntries,
+        songs: songs.length > 0 ? songs : INITIAL_SONGS,
+        savingsFunds: savingsFunds.length > 0 ? savingsFunds : INITIAL_SAVINGS_FUNDS,
+        canonicalId,
+      };
+    }
+
+    // 5. True first-time user (Brand new account, zero existing subcollections)
+    const initialProfile: UserProfile = {
+      uid: canonicalId,
+      email,
+      name: userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Mới'),
+      avatar: '🥑',
+      memberId: memberCode,
+      joinedDate: new Date().toLocaleDateString('vi-VN'),
+      monthlyWorkHours: 160,
+      currentStreakDays: 1,
+      longestStreakDays: 1,
+      lastActiveDate: new Date().toISOString().split('T')[0],
+    };
+
+    const initialData: FullUserData = {
+      userProfile: initialProfile,
+      hourlyWage: 50000,
+      rolloverSavings: 0,
+      jars: INITIAL_JARS,
+      wallets: INITIAL_WALLETS,
+      transactions: [],
+      recurringExpenses: INITIAL_RECURRING,
+      wishlist: [],
+      assets: [],
+      diaryEntries: [],
+      songs: INITIAL_SONGS,
+      savingsFunds: INITIAL_SAVINGS_FUNDS,
       canonicalId,
     };
 
-    // If sourceId was legacy UID and canonicalId is different, migrate to canonicalId
-    if (sourceId !== canonicalId) {
-      try {
-        await saveFullUserDataToFirestore(canonicalId, resultData);
-      } catch (migrateErr) {
-        console.warn('Migration to canonicalId warning:', migrateErr);
-      }
-    }
-
-    return resultData;
+    // Save initial profile & basic collections only for true first-time user
+    await saveFullUserDataToFirestore(canonicalId, initialData);
+    return initialData;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, userDocPath);
   }

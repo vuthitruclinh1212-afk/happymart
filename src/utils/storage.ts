@@ -397,3 +397,29 @@ export const saveStored = <T>(key: string, data: T) => {
     console.debug(`Error saving ${key}`, e);
   }
 };
+
+/**
+ * Returns date in YYYY-MM-DD using local timezone (never shifts day due to UTC conversion)
+ */
+export const getLocalDateString = (d: Date = new Date()): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/**
+ * Normalizes any date string (ISO, timestamp, slash-separated) to YYYY-MM-DD
+ */
+export const normalizeDateString = (rawDate: string | undefined): string => {
+  if (!rawDate) return '';
+  if (rawDate.includes('T')) return rawDate.split('T')[0];
+  const parts = rawDate.split(/[-/]/);
+  if (parts.length === 3) {
+    const y = parts[0].length === 4 ? parts[0] : parts[2];
+    const m = parts[1].padStart(2, '0');
+    const d = (parts[0].length === 4 ? parts[2] : parts[0]).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return rawDate;
+};

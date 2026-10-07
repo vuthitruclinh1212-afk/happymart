@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, Jar, Wallet, MoodId } from '../types';
-import { MOODS } from '../utils/storage';
+import { MOODS, getLocalDateString } from '../utils/storage';
 import { Trash2, Edit2, Search, Filter, Printer, Calendar, X, Check, Sparkles, AlertCircle } from 'lucide-react';
 import { playSoftPop, playCashRegister } from '../utils/audio';
 
@@ -42,12 +42,12 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
   const [editNote, setEditNote] = useState<string>('');
   const [editDate, setEditDate] = useState<string>('');
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => getLocalDateString(), []);
   const currentMonthStr = useMemo(() => todayStr.slice(0, 7), [todayStr]);
   const sevenDaysAgoStr = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
-    return d.toISOString().split('T')[0];
+    return getLocalDateString(d);
   }, []);
 
   // Filter transactions with date and type filter logic

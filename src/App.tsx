@@ -35,6 +35,7 @@ import {
   RANKS,
   loadStored,
   saveStored,
+  getLocalDateString,
 } from './utils/storage';
 import { setAudioMuted, getAudioMuted, playFanfare, playCashRegister } from './utils/audio';
 import { triggerMegaConfetti } from './utils/confetti';
@@ -564,7 +565,7 @@ export default function App() {
     }
 
     // Check streak update
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     if (userProfile.lastActiveDate !== todayStr) {
       const updatedProfile = {
         ...userProfile,
@@ -1101,7 +1102,7 @@ export default function App() {
         targetWalletId: tgtId,
         mood: 'love',
         note: `Trích tiền tiết kiệm ban đầu cho quỹ "${fundData.name}" (${srcName} ➔ ${tgtName})`,
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateString(),
         workHours: 0,
         createdAt: Date.now(),
         type: 'transfer',
@@ -1196,7 +1197,7 @@ export default function App() {
         targetWalletId: tgtId,
         mood: 'love',
         note: `Nạp tiền tích lũy vào quỹ "${fund.name}" (${srcName} ➔ ${tgtName})`,
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateString(),
         workHours: 0,
         createdAt: Date.now(),
         type: 'transfer',
@@ -1276,7 +1277,7 @@ export default function App() {
       targetWalletId: toWalletId,
       mood: 'love',
       note: `Chuyển đổi nguồn tiền cất giữ quỹ "${fund.name}" từ ${fromName} sang ${toName}`,
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalDateString(),
       workHours: 0,
       createdAt: Date.now(),
       type: 'transfer',

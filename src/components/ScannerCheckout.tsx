@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Jar, Wallet, MoodId } from '../types';
-import { MOODS } from '../utils/storage';
+import { MOODS, getLocalDateString } from '../utils/storage';
 import { playScannerBeep, playCashRegister, playSoftPop, playFanfare } from '../utils/audio';
 import { triggerConfetti } from '../utils/confetti';
 import {
@@ -150,7 +150,7 @@ export const ScannerCheckout: React.FC<ScannerCheckoutProps> = ({
   });
   const [mood, setMood] = useState<MoodId>('love');
   const [note, setNote] = useState<string>('');
-  const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState<string>(() => getLocalDateString());
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [lastScanAlert, setLastScanAlert] = useState<{
     hours: string;

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Jar, Wallet, Transaction, SavingsFund } from '../types';
 import { SavingsFundsManager } from './SavingsFundsManager';
+import { getLocalDateString, normalizeDateString } from '../utils/storage';
 import {
   Plus,
   Edit2,
@@ -86,6 +87,7 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
   // Chart configuration state
   const [chartTimeRange, setChartTimeRange] = useState<'7d' | '14d' | '30d'>('7d');
   const [chartMode, setChartMode] = useState<'daily' | 'cumulative'>('daily');
+  const [chartMetric, setChartMetric] = useState<'both' | 'expense' | 'income'>('both');
 
   // Total monthly auto-deduction from savings funds (MẶC ĐỊNH CHI ĐỂ TIẾT KIỆM)
   const totalMonthlySavings = useMemo(() => {
@@ -107,10 +109,10 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
     .filter((t) => t.type === 'income')
     .reduce((sum, t) => sum + Number(t.amount), 0);
 
-  // Chi tiêu tiêu hao thực tế (tiền đã thực sự rời khỏi túi cho các giao dịch quét mã/chi tiêu)
+  // Chi tiêu tiêu hao thực tế (tiền đã thực sự rời khỏi túi cho các giao dịch quét mã/chi tiêu, không tính chuyển ví)
   const actualExpenses = useMemo(() => {
     return transactions
-      .filter((t) => t.type !== 'income')
+      .filter((t) => t.type !== 'income' && t.type !== 'transfer')
       .reduce((sum, t) => sum + Number(t.amount), 0);
   }, [transactions]);
 
@@ -119,8 +121,13 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
     return (savingsFunds || []).reduce((sum, f) => sum + f.currentSaved, 0);
   }, [savingsFunds]);
 
-  const totalBudget = jars.reduce((sum, j) => sum + j.limit, 0);
-  const totalSpent = Object.values(jarSpentMap).reduce((sum, v) => sum + v, 0);
+  // Danh sách các hũ chi tiêu (Loại bỏ LTSS ra khỏi danh sách hũ chi vì đã quản lý độc lập tại CÁC QUỸ TIẾT KIỆM MỤC TIÊU DÀI HẠN)
+  const spendingJars = useMemo(() => jars.filter((j) => j.id !== 'ltss'), [jars]);
+  const totalBudget = useMemo(() => spendingJars.reduce((sum, j) => sum + j.limit, 0), [spendingJars]);
+  const totalSpent = useMemo(
+    () => spendingJars.reduce((sum, j) => sum + (jarSpentMap[j.id] || 0), 0),
+    [spendingJars, jarSpentMap]
+  );
   const totalWalletBalance = wallets.reduce((sum, w) => sum + w.balance, 0);
   
   // Tiền khả dụng để chi tiêu tự do = Tổng số dư trong các ví - Số tiền đang khóa trong quỹ tiết kiệm
@@ -147,7 +154,7 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
   const totalWorkHoursUsed = (totalSpent / (hourlyWage || 1)).toFixed(1);
   const overallSpentPercent = totalBudget > 0 ? Math.min(Math.round((totalSpent / totalBudget) * 100), 100) : 0;
 
-  // Process jars with 90% threshold warning detection
+  // Process jars with 90% threshold warning detection (chỉ các hũ chi tiêu thông thường)
   const jarsWithStatus = useMemo(() => {
     return jars.map((jar) => {
       const spent = jarSpentMap[jar.id] || 0;
@@ -168,9 +175,11 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
     });
   }, [jars, jarSpentMap]);
 
-  // Jars that breached 90% or 100%
+  // Jars that breached 90% or 100% (loại bỏ LTSS khỏi cảnh báo vượt hạn mức chi tiêu)
   const alertedJars = useMemo(() => {
-    return jarsWithStatus.filter((j) => j.isWarning || j.isExceeded);
+    return jarsWithStatus
+      .filter((j) => j.id !== 'ltss')
+      .filter((j) => j.isWarning || j.isExceeded);
   }, [jarsWithStatus]);
 
   // Request or toggle Web Push Notification
@@ -198,89 +207,143 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
     }
   };
 
-  // Real-time Spending AreaChart Data computed directly from transactions
+  // Real-time Spending & Income AreaChart Data computed directly from transactions
   const daysCount = chartTimeRange === '7d' ? 7 : chartTimeRange === '14d' ? 14 : 30;
   
   const chartData = useMemo(() => {
     const data = [];
     const now = new Date();
-    let cumulativeSum = 0;
+    const todayYear = now.getFullYear();
+    const todayMonth = now.getMonth();
+    const todayDate = now.getDate();
+
+    let cumulativeExpense = 0;
+    let cumulativeIncome = 0;
 
     for (let i = daysCount - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      // Local calendar day arithmetic (không bị lệch timezone UTC)
+      const d = new Date(todayYear, todayMonth, todayDate - i);
+      const dateStr = getLocalDateString(d);
       const dayLabel = `${d.getDate()}/${d.getMonth() + 1}`;
 
-      // Find all transactions on this date
-      const dayTxs = transactions.filter((t) => t.date === dateStr);
-      const expenseTxs = dayTxs.filter((t) => t.type !== 'income');
-      const dailySpent = expenseTxs.reduce((sum, t) => sum + Number(t.amount), 0);
-      const dailyIncome = dayTxs
-        .filter((t) => t.type === 'income')
-        .reduce((sum, t) => sum + Number(t.amount), 0);
-      cumulativeSum += dailySpent;
+      // Filter all transactions on this exact local date
+      const dayTxs = transactions.filter((t) => {
+        if (!t.date) return false;
+        return normalizeDateString(t.date) === dateStr;
+      });
+
+      // Strict segregation: transfers are internal wallet movements, never counted as expense or income
+      const expenseTxs = dayTxs.filter((t) => t.type !== 'income' && t.type !== 'transfer');
+      const incomeTxs = dayTxs.filter((t) => t.type === 'income');
+
+      const dailySpent = expenseTxs.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const dailyIncome = incomeTxs.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+      cumulativeExpense += dailySpent;
+      cumulativeIncome += dailyIncome;
 
       data.push({
         dateStr,
         dateLabel: i === 0 ? 'Hôm nay' : dayLabel,
         dailySpent,
         dailyIncome,
-        cumulativeSpent: cumulativeSum,
-        txCount: expenseTxs.length,
+        cumulativeSpent: cumulativeExpense,
+        cumulativeIncome: cumulativeIncome,
+        netDaily: dailyIncome - dailySpent,
+        netCumulative: cumulativeIncome - cumulativeExpense,
+        expenseCount: expenseTxs.length,
+        incomeCount: incomeTxs.length,
+        txCount: expenseTxs.length + incomeTxs.length,
         workHours: Number((dailySpent / (hourlyWage || 1)).toFixed(1)),
-        items: expenseTxs.map((t) => t.subCategory),
+        expenseItems: expenseTxs.map((t) => t.subCategory),
+        incomeItems: incomeTxs.map((t) => t.subCategory),
       });
     }
     return data;
   }, [transactions, hourlyWage, daysCount]);
 
-  const totalPeriodSpent = chartData.reduce((sum, d) => sum + d.dailySpent, 0);
-  const totalPeriodTxCount = chartData.reduce((sum, d) => sum + d.txCount, 0);
+  const totalPeriodSpent = useMemo(
+    () => chartData.reduce((sum, d) => sum + d.dailySpent, 0),
+    [chartData]
+  );
+  const totalPeriodIncome = useMemo(
+    () => chartData.reduce((sum, d) => sum + d.dailyIncome, 0),
+    [chartData]
+  );
+  const totalPeriodNet = totalPeriodIncome - totalPeriodSpent;
+  const totalPeriodTxCount = useMemo(
+    () => chartData.reduce((sum, d) => sum + d.txCount, 0),
+    [chartData]
+  );
   const totalPeriodHours = (totalPeriodSpent / (hourlyWage || 1)).toFixed(1);
   const averageDailySpent = Math.round(totalPeriodSpent / daysCount);
+  const averageDailyIncome = Math.round(totalPeriodIncome / daysCount);
 
-  // Custom Recharts Tooltip
+  // Custom Recharts Tooltip with Income, Expense & Net Flow
   const CustomSpendingTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       const dataPoint = payload[0].payload;
+      const isDaily = chartMode === 'daily';
+      const dispSpent = isDaily ? dataPoint.dailySpent : dataPoint.cumulativeSpent;
+      const dispIncome = isDaily ? dataPoint.dailyIncome : dataPoint.cumulativeIncome;
+      const dispNet = isDaily ? dataPoint.netDaily : dataPoint.netCumulative;
+
       return (
-        <div className="bg-white/95 backdrop-blur-md p-3.5 rounded-2xl border-2 border-pink-200 shadow-lg text-xs space-y-1.5 min-w-48">
+        <div className="bg-white/95 backdrop-blur-md p-3.5 rounded-2xl border-2 border-pink-200 shadow-xl text-xs space-y-2 min-w-56">
           <div className="font-black text-gray-900 border-b border-gray-100 pb-1 flex items-center justify-between">
             <span>Ngày: {label}</span>
             <span className="text-[10px] text-gray-400 font-mono font-normal">({dataPoint.dateStr})</span>
           </div>
 
-          <div className="space-y-1 text-gray-700">
-            <div className="flex justify-between items-center">
-              <span className="font-bold text-pink-700">Chi trong ngày:</span>
-              <strong className="font-black text-pink-700 tabular-nums">
-                {dataPoint.dailySpent.toLocaleString('vi-VN')} đ
+          <div className="space-y-1.5 text-gray-700">
+            <div className="flex justify-between items-center text-rose-700">
+              <span className="font-bold flex items-center gap-1">🔴 {isDaily ? 'Chi trong ngày' : 'Tổng chi tích lũy'}:</span>
+              <strong className="font-black tabular-nums">
+                {dispSpent.toLocaleString('vi-VN')} đ
               </strong>
             </div>
 
-            <div className="flex justify-between items-center text-[11px] text-purple-700 font-semibold">
-              <span>Tích lũy đến ngày:</span>
-              <span className="tabular-nums font-bold">
-                {dataPoint.cumulativeSpent.toLocaleString('vi-VN')} đ
+            <div className="flex justify-between items-center text-emerald-700">
+              <span className="font-bold flex items-center gap-1">🟢 {isDaily ? 'Thu trong ngày' : 'Tổng thu tích lũy'}:</span>
+              <strong className="font-black tabular-nums">
+                {dispIncome.toLocaleString('vi-VN')} đ
+              </strong>
+            </div>
+
+            <div className="flex justify-between items-center pt-1 border-t border-gray-100 text-[11px] font-bold">
+              <span className="text-gray-600">Dòng tiền chênh lệch:</span>
+              <span className={`tabular-nums font-black ${dispNet >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {dispNet >= 0 ? '+' : ''}{dispNet.toLocaleString('vi-VN')} đ
               </span>
             </div>
 
-            <div className="flex justify-between items-center text-[11px] text-amber-700 font-medium">
-              <span>Thời gian làm việc:</span>
-              <span className="font-bold">⏱️ {dataPoint.workHours} giờ</span>
-            </div>
+            {dataPoint.workHours > 0 && (
+              <div className="flex justify-between items-center text-[11px] text-amber-700 font-medium">
+                <span>Thời gian làm việc:</span>
+                <span className="font-bold">⏱️ {dataPoint.workHours} giờ</span>
+              </div>
+            )}
 
             <div className="flex justify-between items-center text-[11px] text-gray-500">
-              <span>Số món đã quét:</span>
-              <span className="font-bold">{dataPoint.txCount} món</span>
+              <span>Số giao dịch:</span>
+              <span className="font-bold">{dataPoint.txCount} món ({dataPoint.expenseCount} chi, {dataPoint.incomeCount} thu)</span>
             </div>
           </div>
 
-          {dataPoint.items && dataPoint.items.length > 0 && (
-            <div className="pt-1.5 border-t border-gray-100 text-[10px] text-gray-500 font-medium truncate">
-              Món: {dataPoint.items.slice(0, 3).join(', ')}
-              {dataPoint.items.length > 3 ? '...' : ''}
+          {(dataPoint.expenseItems?.length > 0 || dataPoint.incomeItems?.length > 0) && (
+            <div className="pt-1.5 border-t border-gray-100 text-[10px] space-y-0.5 text-gray-500 font-medium truncate">
+              {dataPoint.expenseItems?.length > 0 && (
+                <div className="truncate text-rose-600">
+                  Chi: {dataPoint.expenseItems.slice(0, 3).join(', ')}
+                  {dataPoint.expenseItems.length > 3 ? '...' : ''}
+                </div>
+              )}
+              {dataPoint.incomeItems?.length > 0 && (
+                <div className="truncate text-emerald-600">
+                  Thu: {dataPoint.incomeItems.slice(0, 3).join(', ')}
+                  {dataPoint.incomeItems.length > 3 ? '...' : ''}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -511,25 +574,70 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
         </div>
       </div>
 
-      {/* RECHARTS AREACHART: TRỰC QUAN HÓA TỔNG CHI TIÊU THEO THỜI GIAN TỪ TRANSACTIONS */}
+      {/* RECHARTS AREACHART: TRỰC QUAN HÓA TỔNG THU & CHI THEO THỜI GIAN THỰC TẾ TỪ TRANSACTIONS */}
       <div className="bg-white p-5 sm:p-6 rounded-3xl border-2 border-pink-200/90 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <span className="text-2xl p-2 rounded-2xl bg-pink-100 text-pink-700">
+            <span className="text-2xl p-2 rounded-2xl bg-gradient-to-tr from-pink-100 to-emerald-100 text-pink-700">
               📈
             </span>
             <div>
-              <h3 className="font-black text-base text-gray-900 tracking-tight flex items-center gap-2">
-                BIỂU ĐỒ DIỆN TÍCH TỔNG CHI TIÊU (AREACHART)
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-black text-base text-gray-900 tracking-tight">
+                  BIỂU ĐỒ DIỆN TÍCH TỔNG THU & CHI (AREACHART)
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                  Tự động cập nhật
+                </span>
+              </div>
               <p className="text-xs text-gray-500 font-medium">
-                Trực quan hóa chi tiêu theo thời gian thực tế sử dụng dữ liệu từ các lần quét mã thu ngân
+                Theo dõi diễn biến thu chi thực tế theo từng ngày hoặc lũy kế, cập nhật ngay lập tức khi thêm hoặc xóa giao dịch
               </p>
             </div>
           </div>
 
           {/* Mode & Time Range Controls */}
-          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto text-xs font-bold">
+          <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto text-xs font-bold">
+            {/* Thu / Chi / Cả hai Selector */}
+            <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => {
+                  playSoftPop();
+                  setChartMetric('both');
+                }}
+                className={`px-2.5 py-1.5 rounded-xl transition-all ${
+                  chartMetric === 'both' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                🔘 Cả Thu & Chi
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playSoftPop();
+                  setChartMetric('expense');
+                }}
+                className={`px-2.5 py-1.5 rounded-xl transition-all ${
+                  chartMetric === 'expense' ? 'bg-rose-500 text-white shadow-2xs' : 'text-gray-600 hover:text-rose-600'
+                }`}
+              >
+                🔴 Chi Tiêu
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playSoftPop();
+                  setChartMetric('income');
+                }}
+                className={`px-2.5 py-1.5 rounded-xl transition-all ${
+                  chartMetric === 'income' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-gray-600 hover:text-emerald-600'
+                }`}
+              >
+                🟢 Thu Nhập
+              </button>
+            </div>
+
             {/* Metric Mode Toggle */}
             <div className="flex items-center gap-1 p-1 bg-pink-50 rounded-2xl border border-pink-200">
               <button
@@ -538,7 +646,7 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                   playSoftPop();
                   setChartMode('daily');
                 }}
-                className={`px-3 py-1.5 rounded-xl transition-all ${
+                className={`px-2.5 py-1.5 rounded-xl transition-all ${
                   chartMode === 'daily'
                     ? 'bg-pink-500 text-white shadow-2xs'
                     : 'text-pink-900 hover:text-pink-600'
@@ -552,7 +660,7 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                   playSoftPop();
                   setChartMode('cumulative');
                 }}
-                className={`px-3 py-1.5 rounded-xl transition-all ${
+                className={`px-2.5 py-1.5 rounded-xl transition-all ${
                   chartMode === 'cumulative'
                     ? 'bg-purple-600 text-white shadow-2xs'
                     : 'text-purple-900 hover:text-purple-600'
@@ -606,31 +714,37 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
 
         {/* Chart Period Stat Badges */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-          <div className="p-3 bg-pink-50/80 rounded-2xl border border-pink-200">
-            <span className="text-[11px] text-pink-700 font-bold block">Tổng Chi Trong Kỳ:</span>
-            <strong className="text-sm font-black text-pink-900 tabular-nums">
+          <div className="p-3 bg-rose-50/80 rounded-2xl border border-rose-200">
+            <span className="text-[11px] text-rose-700 font-bold block">Tổng Chi Trong Kỳ:</span>
+            <strong className="text-sm font-black text-rose-900 tabular-nums">
               {totalPeriodSpent.toLocaleString('vi-VN')} đ
             </strong>
           </div>
 
+          <div className="p-3 bg-emerald-50/80 rounded-2xl border border-emerald-200">
+            <span className="text-[11px] text-emerald-700 font-bold block">Tổng Thu Trong Kỳ:</span>
+            <strong className="text-sm font-black text-emerald-900 tabular-nums">
+              +{totalPeriodIncome.toLocaleString('vi-VN')} đ
+            </strong>
+          </div>
+
+          <div className={`p-3 rounded-2xl border ${
+            totalPeriodNet >= 0
+              ? 'bg-teal-50/80 border-teal-200 text-teal-900'
+              : 'bg-amber-50/80 border-amber-200 text-amber-900'
+          }`}>
+            <span className="text-[11px] font-bold block">
+              {totalPeriodNet >= 0 ? 'Thặng Dư Ròng 🟢:' : 'Thâm Hụt Ròng 🔴:'}
+            </span>
+            <strong className="text-sm font-black tabular-nums">
+              {totalPeriodNet >= 0 ? '+' : ''}{totalPeriodNet.toLocaleString('vi-VN')} đ
+            </strong>
+          </div>
+
           <div className="p-3 bg-purple-50/80 rounded-2xl border border-purple-200">
-            <span className="text-[11px] text-purple-700 font-bold block">Số Đơn Quét:</span>
+            <span className="text-[11px] text-purple-700 font-bold block">Giao Dịch Đã Quét:</span>
             <strong className="text-sm font-black text-purple-900 tabular-nums">
-              {totalPeriodTxCount} giao dịch
-            </strong>
-          </div>
-
-          <div className="p-3 bg-amber-50/80 rounded-2xl border border-amber-200">
-            <span className="text-[11px] text-amber-700 font-bold block">Giờ Làm Đã Tiêu:</span>
-            <strong className="text-sm font-black text-amber-900 tabular-nums">
-              ⏱️ {totalPeriodHours} giờ
-            </strong>
-          </div>
-
-          <div className="p-3 bg-sky-50/80 rounded-2xl border border-sky-200">
-            <span className="text-[11px] text-sky-700 font-bold block">Trung Bình / Ngày:</span>
-            <strong className="text-sm font-black text-sky-900 tabular-nums">
-              {averageDailySpent.toLocaleString('vi-VN')} đ/ngày
+              {totalPeriodTxCount} lượt ({totalPeriodHours}h làm việc)
             </strong>
           </div>
         </div>
@@ -641,8 +755,12 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
             <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="spendingGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={chartMode === 'daily' ? '#EC4899' : '#8B5CF6'} stopOpacity={0.65} />
-                  <stop offset="95%" stopColor={chartMode === 'daily' ? '#F472B6' : '#C084FC'} stopOpacity={0.04} />
+                  <stop offset="5%" stopColor="#F43F5E" stopOpacity={0.65} />
+                  <stop offset="95%" stopColor="#FB7185" stopOpacity={0.04} />
+                </linearGradient>
+                <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10B981" stopOpacity={0.65} />
+                  <stop offset="95%" stopColor="#34D399" stopOpacity={0.04} />
                 </linearGradient>
               </defs>
 
@@ -666,16 +784,34 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                 }
               />
               <Tooltip content={<CustomSpendingTooltip />} />
-              <Area
-                type="monotone"
-                dataKey={chartMode === 'daily' ? 'dailySpent' : 'cumulativeSpent'}
-                stroke={chartMode === 'daily' ? '#DB2777' : '#7C3AED'}
-                strokeWidth={3}
-                fillOpacity={1}
-                fill="url(#spendingGradient)"
-                name={chartMode === 'daily' ? 'Chi Tiêu Từng Ngày' : 'Tổng Chi Tích Lũy'}
-                activeDot={{ r: 6, fill: '#DB2777', stroke: '#fff', strokeWidth: 2 }}
-              />
+              
+              {/* Income Area (Xanh ngọc) */}
+              {(chartMetric === 'both' || chartMetric === 'income') && (
+                <Area
+                  type="monotone"
+                  dataKey={chartMode === 'daily' ? 'dailyIncome' : 'cumulativeIncome'}
+                  stroke="#059669"
+                  strokeWidth={3}
+                  fillOpacity={1}
+                  fill="url(#incomeGradient)"
+                  name={chartMode === 'daily' ? 'Thu Nhập Từng Ngày' : 'Tổng Thu Tích Lũy'}
+                  activeDot={{ r: 6, fill: '#059669', stroke: '#fff', strokeWidth: 2 }}
+                />
+              )}
+
+              {/* Expense Area (Đỏ hồng) */}
+              {(chartMetric === 'both' || chartMetric === 'expense') && (
+                <Area
+                  type="monotone"
+                  dataKey={chartMode === 'daily' ? 'dailySpent' : 'cumulativeSpent'}
+                  stroke="#E11D48"
+                  strokeWidth={3}
+                  fillOpacity={1}
+                  fill="url(#spendingGradient)"
+                  name={chartMode === 'daily' ? 'Chi Tiêu Từng Ngày' : 'Tổng Chi Tích Lũy'}
+                  activeDot={{ r: 6, fill: '#E11D48', stroke: '#fff', strokeWidth: 2 }}
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -683,12 +819,20 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
         {/* Helpful Tip */}
         {transactions.length === 0 ? (
           <div className="p-3 bg-pink-50/60 rounded-2xl border border-pink-200 text-center text-xs text-gray-500 font-medium">
-            💡 Hiện tại bạn chưa quét khoản chi nào. Khi bạn quét các khoản chi tại tab <strong>Quét Thu Chi</strong>, đường biểu đồ AreaChart sẽ vẽ trực quan hóa diễn biến chi tiêu tức thì theo từng ngày! ✨
+            💡 Hiện tại chưa có giao dịch nào được ghi nhận. Khi bạn quét thêm các khoản chi hoặc nạp thu nhập, biểu đồ AreaChart sẽ vẽ trực quan hóa diễn biến tức thì theo từng ngày! ✨
           </div>
         ) : (
-          <div className="flex items-center justify-between text-[11px] text-gray-400 font-medium px-1">
-            <span>Dữ liệu được cập nhật tự động từ danh sách giao dịch thực tế</span>
-            <span>Chế độ hiển thị: {chartMode === 'daily' ? 'Chi tiêu từng ngày' : 'Tích lũy tổng chi'}</span>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-[11px] text-gray-400 font-medium px-1">
+            <span className="flex items-center gap-3">
+              <span className="flex items-center gap-1 text-emerald-700 font-bold">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span> Thu Nhập
+              </span>
+              <span className="flex items-center gap-1 text-rose-700 font-bold">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span> Chi Tiêu
+              </span>
+              <span>• Dữ liệu tự động đồng bộ theo thời gian thực</span>
+            </span>
+            <span>Chế độ: {chartMode === 'daily' ? 'Từng ngày' : 'Tích lũy'} ({chartMetric === 'both' ? 'Cả thu & chi' : chartMetric === 'expense' ? 'Chỉ chi' : 'Chỉ thu'})</span>
           </div>
         )}
       </div>
@@ -819,9 +963,11 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
         onNavigateToTransfer={onNavigateToTransfer}
       />
 
-      {/* The 6 Jars Grid */}
+      {/* 3. The Spending Jars Grid (Đã loại bỏ khung Tiết Kiệm Dài Hạn LTSS theo yêu cầu, toàn bộ mục tiêu tiết kiệm dài hạn được quản lý tập trung ở mục CÁC QUỸ TIẾT KIỆM MỤC TIÊU DÀI HẠN phía trên) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {jarsWithStatus.map((jar) => {
+        {jarsWithStatus
+          .filter((jar) => jar.id !== 'ltss')
+          .map((jar) => {
           const { spent, remaining, pct, isOver, isWarning, isExceeded } = {
             spent: jar.spent,
             remaining: jar.remaining,
@@ -971,45 +1117,8 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
               {/* Subcategories list */}
               <div className="mt-4 pt-3 border-t border-black/10">
                 <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 mb-1.5">
-                  <span>
-                    {jar.id === 'ltss'
-                      ? 'CÁC MỤC TIẾT KIỆM MỤC TIÊU:'
-                      : 'MỤC CON (BẤM ĐỂ QUÉT NHANH):'}
-                  </span>
-                  {jar.id === 'ltss' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        playSoftPop();
-                        if (onNavigateToTransfer) onNavigateToTransfer();
-                      }}
-                      className="text-[10px] text-purple-700 hover:text-purple-900 font-extrabold flex items-center gap-1 hover:underline"
-                      title="Chuyển tiền qua lại giữa các nguồn tiền tiết kiệm"
-                    >
-                      <ArrowLeftRight className="w-3 h-3 text-purple-600" />
-                      <span>Chuyển nguồn tiết kiệm 🔄</span>
-                    </button>
-                  )}
+                  <span>MỤC CON (BẤM ĐỂ QUÉT NHANH):</span>
                 </div>
-
-                {/* For LTSS: Show dedicated savings funds */}
-                {jar.id === 'ltss' && savingsFunds.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {savingsFunds.map((fund) => (
-                      <div
-                        key={fund.id}
-                        className="text-[11px] bg-purple-100/80 text-purple-950 px-2.5 py-1 rounded-xl font-bold border border-purple-200 flex items-center gap-1.5 shadow-2xs"
-                        title={`Mục tiêu: ${fund.targetAmount.toLocaleString('vi-VN')} đ trong ${fund.targetMonths} tháng. Tự động chi: ${fund.monthlyAmount.toLocaleString('vi-VN')} đ/tháng`}
-                      >
-                        <span>{fund.icon}</span>
-                        <span>{fund.name}</span>
-                        <span className="text-[10px] text-purple-700 bg-white/80 px-1 py-0.2 rounded font-black">
-                          {fund.monthlyAmount >= 1000000 ? `${(fund.monthlyAmount / 1000000).toFixed(1)}Tr` : `${(fund.monthlyAmount / 1000).toFixed(0)}k`}/tháng
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
 
                 <div className="flex flex-wrap gap-1.5">
                   {jar.subs.map((s, idx) => (

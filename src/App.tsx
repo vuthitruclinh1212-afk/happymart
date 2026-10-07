@@ -38,6 +38,7 @@ import {
 } from './utils/storage';
 import { setAudioMuted, getAudioMuted, playFanfare, playCashRegister } from './utils/audio';
 import { triggerMegaConfetti } from './utils/confetti';
+import { deleteAudioFile } from './utils/audioStorage';
 import { auth, onAuthStateChanged, FirebaseUser } from './firebase';
 import {
   loadUserDataFromFirestore,
@@ -893,13 +894,14 @@ export default function App() {
   };
 
   // Handler: Favorite Songs actions
-  const handleAddSong = (songData: Omit<FavoriteSong, 'id'>) => {
+  const handleAddSong = (songData: Omit<FavoriteSong, 'id'> & { id?: string }) => {
+    const songId = songData.id || `song-${Date.now()}`;
     const newSong: FavoriteSong = {
       ...songData,
-      id: `song-${Date.now()}`,
-      createdAt: Date.now(),
+      id: songId,
+      createdAt: songData.createdAt || Date.now(),
     };
-    setSongs((prev) => [newSong, ...prev]);
+    setSongs((prev) => [newSong, ...prev.filter((s) => s.id !== songId)]);
     if (activeUserId) {
       saveSubDocument(activeUserId, 'songs', newSong);
     }
@@ -937,6 +939,7 @@ export default function App() {
 
   const handleDeleteSong = (id: string) => {
     setSongs((prev) => prev.filter((s) => s.id !== id));
+    deleteAudioFile(id).catch(() => {});
     if (activeUserId) {
       deleteSubDocument(activeUserId, 'songs', id);
     }

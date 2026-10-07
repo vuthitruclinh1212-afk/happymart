@@ -172,6 +172,7 @@ export const INITIAL_SONGS: FavoriteSong[] = [
     moodIcon: '🥑',
     duration: '3:20',
     synthType: 'lofi',
+    audioSourceType: 'synth',
     createdAt: Date.now() - 3600000,
   },
   {
@@ -183,6 +184,7 @@ export const INITIAL_SONGS: FavoriteSong[] = [
     moodIcon: '☕',
     duration: '2:45',
     synthType: 'cafe',
+    audioSourceType: 'synth',
     createdAt: Date.now() - 7200000,
   },
   {
@@ -194,6 +196,7 @@ export const INITIAL_SONGS: FavoriteSong[] = [
     moodIcon: '🧋',
     duration: '3:05',
     synthType: 'chime',
+    audioSourceType: 'synth',
     createdAt: Date.now() - 10800000,
   },
   {
@@ -205,6 +208,7 @@ export const INITIAL_SONGS: FavoriteSong[] = [
     moodIcon: '🥐',
     duration: '2:50',
     synthType: 'bell',
+    audioSourceType: 'synth',
     createdAt: Date.now() - 14400000,
   },
   {
@@ -216,6 +220,7 @@ export const INITIAL_SONGS: FavoriteSong[] = [
     moodIcon: '🌙',
     duration: '4:10',
     synthType: 'ambient',
+    audioSourceType: 'synth',
     createdAt: Date.now() - 18000000,
   },
 ];

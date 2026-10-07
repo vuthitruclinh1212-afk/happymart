@@ -1,25 +1,55 @@
 import { FavoriteSong } from '../types';
+import { getAudioFile, normalizeAudioUrl } from './audioStorage';
 
 /**
- * Supermarket Music Synthesizer & Audio Stream Engine
- * Plays audio files or generates procedural cozy Lo-Fi / pastel background music using Web Audio API.
+ * Supermarket Music Synthesizer & High-Fidelity Audio Engine
+ * Plays local uploaded MP3 files, online audio streams, or procedural Lo-Fi / pastel background music.
  */
 
+export interface MusicPlayerState {
+  isPlaying: boolean;
+  song: FavoriteSong | null;
+  isLoading: boolean;
+  error: string | null;
+  currentTime: number;
+  duration: number;
+  volume: number;
+}
+
 let activeAudioElement: HTMLAudioElement | null = null;
+let currentBlobUrl: string | null = null;
 let synthAudioContext: AudioContext | null = null;
 let synthTimerId: any = null;
 let currentPlayingSong: FavoriteSong | null = null;
-let musicVolume: number = 0.4;
+let musicVolume: number = 0.5;
 let isPlayingState: boolean = false;
-let onStateChangeCallback: ((isPlaying: boolean, song: FavoriteSong | null) => void) | null = null;
+let isLoadingState: boolean = false;
+let playbackError: string | null = null;
+let audioCurrentTime: number = 0;
+let audioDuration: number = 0;
 
-export const setMusicStateListener = (cb: (isPlaying: boolean, song: FavoriteSong | null) => void) => {
+let onStateChangeCallback:
+  | ((isPlaying: boolean, song: FavoriteSong | null, state?: MusicPlayerState) => void)
+  | null = null;
+
+export const setMusicStateListener = (
+  cb: (isPlaying: boolean, song: FavoriteSong | null, state?: MusicPlayerState) => void
+) => {
   onStateChangeCallback = cb;
 };
 
 const notifyChange = () => {
   if (onStateChangeCallback) {
-    onStateChangeCallback(isPlayingState, currentPlayingSong);
+    const state: MusicPlayerState = {
+      isPlaying: isPlayingState,
+      song: currentPlayingSong,
+      isLoading: isLoadingState,
+      error: playbackError,
+      currentTime: audioCurrentTime,
+      duration: audioDuration,
+      volume: musicVolume,
+    };
+    onStateChangeCallback(isPlayingState, currentPlayingSong, state);
   }
 };
 
@@ -30,10 +60,28 @@ export const setMusicVolume = (vol: number) => {
   if (activeAudioElement) {
     activeAudioElement.volume = musicVolume;
   }
+  notifyChange();
 };
 
 export const isMusicPlaying = (): boolean => isPlayingState;
+export const isMusicLoading = (): boolean => isLoadingState;
 export const getActiveSong = (): FavoriteSong | null => currentPlayingSong;
+export const getPlaybackError = (): string | null => playbackError;
+export const getAudioCurrentTime = (): number => audioCurrentTime;
+export const getAudioDuration = (): number => audioDuration;
+
+export const clearPlaybackError = () => {
+  playbackError = null;
+  notifyChange();
+};
+
+export const seekMusic = (timeInSeconds: number) => {
+  if (activeAudioElement && isFinite(timeInSeconds)) {
+    activeAudioElement.currentTime = Math.max(0, Math.min(timeInSeconds, activeAudioElement.duration || 0));
+    audioCurrentTime = activeAudioElement.currentTime;
+    notifyChange();
+  }
+};
 
 const getSynthContext = (): AudioContext | null => {
   try {
@@ -101,7 +149,6 @@ function playSynthStep(synthType: string = 'lofi') {
     masterGain.gain.setValueAtTime(musicVolume * 0.15, now);
     masterGain.connect(ctx.destination);
 
-    // Play soft warm chord tones
     chord.forEach((freq, idx) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -142,37 +189,127 @@ function stopSynthLoop() {
 }
 
 /**
- * Play a specific favorite song
+ * Cleanup previous audio element and blob URLs
+ */
+const cleanupAudioElement = () => {
+  if (activeAudioElement) {
+    activeAudioElement.pause();
+    activeAudioElement.removeAttribute('src');
+    activeAudioElement.load();
+    activeAudioElement = null;
+  }
+  if (currentBlobUrl) {
+    try {
+      URL.revokeObjectURL(currentBlobUrl);
+    } catch {
+      // ignore
+    }
+    currentBlobUrl = null;
+  }
+};
+
+/**
+ * Play a specific favorite song.
+ * Guaranteed to play the user's MP3 file or audio stream.
+ * Does NOT silently replace user MP3s with synthesizer loops!
  */
 export const playSong = async (song: FavoriteSong) => {
-  stopMusic();
+  // Reset previous playback
+  cleanupAudioElement();
+  stopSynthLoop();
 
   currentPlayingSong = song;
-  isPlayingState = true;
-  notifyChange();
+  playbackError = null;
+  audioCurrentTime = 0;
+  audioDuration = 0;
 
-  // If song has a valid audio URL, attempt to stream/play it
-  const url = song.audioUrl?.trim();
-  if (url && (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:'))) {
+  // 1. Check if there's a stored MP3 in IndexedDB for this song
+  let targetPlayUrl: string | null = null;
+  try {
+    const localRecord = await getAudioFile(song.id);
+    if (localRecord && localRecord.blob) {
+      currentBlobUrl = URL.createObjectURL(localRecord.blob);
+      targetPlayUrl = currentBlobUrl;
+    }
+  } catch (err) {
+    console.warn('Error reading from audio storage:', err);
+  }
+
+  // 2. If no local record in IndexedDB, check song.audioUrl
+  if (!targetPlayUrl && song.audioUrl?.trim()) {
+    targetPlayUrl = normalizeAudioUrl(song.audioUrl.trim());
+  }
+
+  // 3. If an audio target exists (user provided an MP3 file or URL), play it!
+  if (targetPlayUrl) {
+    isLoadingState = true;
+    isPlayingState = true;
+    notifyChange();
+
     try {
-      const audio = new Audio(url);
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.crossOrigin = 'anonymous';
       audio.volume = musicVolume;
       audio.loop = true;
 
-      audio.onerror = () => {
-        console.warn('External audio URL failed, falling back to cozy supermarket synth generator.');
-        startSynthLoop(song.synthType || 'lofi');
+      audio.ontimeupdate = () => {
+        audioCurrentTime = audio.currentTime || 0;
+        audioDuration = audio.duration || 0;
+        notifyChange();
       };
 
-      await audio.play();
+      audio.onloadedmetadata = () => {
+        audioDuration = audio.duration || 0;
+        isLoadingState = false;
+        notifyChange();
+      };
+
+      audio.oncanplay = () => {
+        isLoadingState = false;
+        notifyChange();
+      };
+
+      audio.onerror = () => {
+        isLoadingState = false;
+        isPlayingState = false;
+        playbackError =
+          'Không thể phát file/link âm thanh này (có thể do lỗi định dạng hoặc máy chủ chặn truy cập). Hãy bấm tải file MP3 trực tiếp từ máy để phát 100% chuẩn xác!';
+        cleanupAudioElement();
+        notifyChange();
+      };
+
+      audio.src = targetPlayUrl;
       activeAudioElement = audio;
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        await playPromise;
+      }
+
+      isLoadingState = false;
+      isPlayingState = true;
+      notifyChange();
       return;
-    } catch (err) {
-      console.warn('Audio play failed, falling back to procedural synthesizer:', err);
+    } catch (err: any) {
+      console.warn('Audio play failed:', err);
+      isLoadingState = false;
+      isPlayingState = false;
+      playbackError =
+        err?.message?.includes('interact')
+          ? 'Trình duyệt yêu cầu bạn chạm vào màn hình trước khi phát âm thanh.'
+          : 'Không thể phát nhạc MP3 này. Vui lòng thử tải file .mp3 trực tiếp từ thiết bị.';
+      cleanupAudioElement();
+      notifyChange();
+      return;
     }
   }
 
-  // Fallback / Procedural Supermarket Synth Loop
+  // 4. If this is explicitly a synthesizer BGM track (no audioUrl and no MP3 file)
+  isLoadingState = false;
+  isPlayingState = true;
+  playbackError = null;
+  notifyChange();
   startSynthLoop(song.synthType || 'lofi');
 };
 
@@ -180,13 +317,10 @@ export const playSong = async (song: FavoriteSong) => {
  * Stop currently playing music
  */
 export const stopMusic = () => {
-  if (activeAudioElement) {
-    activeAudioElement.pause();
-    activeAudioElement.src = '';
-    activeAudioElement = null;
-  }
+  cleanupAudioElement();
   stopSynthLoop();
   isPlayingState = false;
+  isLoadingState = false;
   notifyChange();
 };
 

@@ -169,6 +169,9 @@ export interface FavoriteSong {
   duration?: string;
   synthType?: 'lofi' | 'cafe' | 'chime' | 'bell' | 'ambient';
   createdAt?: number;
+  audioSourceType?: 'file' | 'url' | 'synth';
+  fileName?: string;
+  hasLocalAudioFile?: boolean;
 }
 
 

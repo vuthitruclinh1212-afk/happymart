@@ -133,7 +133,7 @@ export const INITIAL_SAVINGS_FUNDS: SavingsFund[] = [
     currentSaved: 6000000,
     walletId: 'bank',
     createdAt: Date.now() - 60 * 86400000,
-    note: 'Khoản chi tích lũy tự động hàng tháng để đổi điện thoại sau 6 tháng',
+    note: 'Mục tiêu tích lũy để đổi điện thoại sau 6 tháng',
     isCompleted: false,
   },
   {

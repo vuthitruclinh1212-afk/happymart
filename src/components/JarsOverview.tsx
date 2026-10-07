@@ -94,19 +94,14 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
       .reduce((sum, f) => sum + f.monthlyAmount, 0);
   }, [savingsFunds]);
 
-  // Calculate spent per jar (Chỉ tính giao dịch chi tiêu, loại trừ thu nhập)
+  // Calculate spent per jar (Chỉ tính giao dịch chi tiêu thực tế, loại trừ thu nhập và chuyển ví)
   const jarSpentMap: Record<string, number> = {};
   jars.forEach((j) => (jarSpentMap[j.id] = 0));
   transactions.forEach((t) => {
-    if (t.type !== 'income' && jarSpentMap[t.jarId] !== undefined) {
+    if (t.type !== 'income' && t.type !== 'transfer' && jarSpentMap[t.jarId] !== undefined) {
       jarSpentMap[t.jarId] += Number(t.amount);
     }
   });
-
-  // MẶC ĐỊNH MỖI THÁNG ĐỀU TỰ ĐỘNG CHI ĐỂ TIẾT KIỆM CHO HŨ LTSS (KHÔNG CẦN NHẬP THỦ CÔNG)
-  if (jarSpentMap['ltss'] !== undefined) {
-    jarSpentMap['ltss'] += totalMonthlySavings;
-  }
 
   const totalIncome = transactions
     .filter((t) => t.type === 'income')
@@ -811,7 +806,7 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
         </div>
       )}
 
-      {/* 2. CHỖ TIẾT KIỆM ĐẶC BIỆT: CÁC QUỸ TIẾT KIỆM MỤC TIÊU CON (TỰ ĐỘNG TRÍCH HÀNG THÁNG) */}
+      {/* 2. QUẢN LÝ CÁC QUỸ TIẾT KIỆM MỤC TIÊU DÀI HẠN */}
       <SavingsFundsManager
         savingsFunds={savingsFunds}
         wallets={wallets}
@@ -971,18 +966,6 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                   </span>
                 </div>
 
-                {/* Đặc biệt cho Hũ Tiết Kiệm (LTSS): Hiển thị chi tiết khoản chi tự động hàng tháng */}
-                {jar.id === 'ltss' && totalMonthlySavings > 0 && (
-                  <div className="mt-2 p-2 rounded-xl bg-purple-100/90 border border-purple-200 text-[11px] text-purple-950 flex items-center justify-between">
-                    <span className="font-bold flex items-center gap-1">
-                      <span>🛡️ Mặc định chi:</span>
-                      <strong className="text-purple-700">+{totalMonthlySavings.toLocaleString('vi-VN')} đ/tháng</strong>
-                    </span>
-                    <span className="text-[10px] bg-purple-200 px-1.5 py-0.5 rounded-md font-extrabold">
-                      {savingsFunds.filter((f) => !f.isCompleted).length} quỹ mục tiêu
-                    </span>
-                  </div>
-                )}
               </div>
 
               {/* Subcategories list */}
@@ -990,7 +973,7 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                 <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 mb-1.5">
                   <span>
                     {jar.id === 'ltss'
-                      ? 'CÁC MỤC TIẾT KIỆM CON (TỰ ĐỘNG ĐỊNH KỲ):'
+                      ? 'CÁC MỤC TIẾT KIỆM MỤC TIÊU:'
                       : 'MỤC CON (BẤM ĐỂ QUÉT NHANH):'}
                   </span>
                   {jar.id === 'ltss' && (

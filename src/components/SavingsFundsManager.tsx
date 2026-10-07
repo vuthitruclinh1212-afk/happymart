@@ -280,14 +280,14 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-base sm:text-lg font-black text-purple-950 tracking-tight">
-                CÁC QUỸ TIẾT KIỆM MỤC TIÊU (TỰ ĐỘNG TRÍCH HÀNG THÁNG)
+                CÁC QUỸ TIẾT KIỆM MỤC TIÊU DÀI HẠN
               </h3>
               <span className="px-2 py-0.5 rounded-full bg-purple-200/80 text-purple-900 text-[10px] font-black uppercase tracking-wider">
-                Mặc định hàng tháng
+                Mục tiêu tích lũy
               </span>
             </div>
             <p className="text-xs text-purple-800/80 font-medium mt-0.5">
-              Mỗi mục nhỏ (như mua điện thoại, quỹ khẩn cấp) được chia thành quỹ riêng với thời gian cụ thể. Hệ thống tự động tính số tiền cần trích mỗi tháng và mặc định tính vào chi tiêu định kỳ mà không cần nhập thủ công!
+              Mỗi mục tiêu (như mua điện thoại, quỹ khẩn cấp) được theo dõi thành quỹ riêng. Tiền tiết kiệm là tài sản của bạn, không bị tính mặc định vào chi tiêu hàng tháng!
             </p>
           </div>
         </div>
@@ -304,12 +304,12 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
 
       {/* Auto-Deduction & Overall Status Metric Card */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {/* Metric 1: Monthly Auto-Deduction */}
+        {/* Metric 1: Monthly Suggested Savings */}
         <div className="bg-white/95 backdrop-blur-xs p-4 rounded-2xl border border-purple-200 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-purple-700 font-bold mb-1">
-            <span>TỰ ĐỘNG TRÍCH MỖI THÁNG 📅</span>
+            <span>MỤC TIÊU GỢI Ý MỖI THÁNG 🎯</span>
             <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded-md font-bold">
-              Không cần quét mã
+              Tùy chọn nạp
             </span>
           </div>
           <div className="text-2xl font-black text-purple-900 tracking-tight">
@@ -318,7 +318,7 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
           </div>
           <div className="text-[11px] text-gray-500 font-medium mt-1 flex items-center gap-1">
             <Clock className="w-3.5 h-3.5 text-purple-500" />
-            <span>Tương đương ~{totalWorkHoursMonthly} giờ làm việc mỗi tháng</span>
+            <span>Gợi ý để đạt mục tiêu đúng hạn (~{totalWorkHoursMonthly}h làm việc)</span>
           </div>
         </div>
 
@@ -534,7 +534,7 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
               <div className="bg-purple-50/90 border border-purple-200 rounded-xl p-2.5 my-2 flex items-center justify-between text-xs">
                 <div>
                   <span className="text-[10px] font-bold text-purple-600 block uppercase">
-                    Mỗi tháng tự động trích:
+                    Gợi ý trích mỗi tháng:
                   </span>
                   <div className="font-black text-purple-950 text-sm sm:text-base tracking-tight">
                     {fund.monthlyAmount.toLocaleString('vi-VN')}{' '}

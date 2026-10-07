@@ -73,15 +73,12 @@ export const FinancialForecast: React.FC<FinancialForecastProps> = ({
       .reduce((sum, r) => sum + r.amount, 0);
   }, [recurringExpenses]);
 
-  // Savings allocation targets (LTSS + FFA hoặc tổng các quỹ tiết kiệm con tự động)
+  // Savings allocation targets (LTSS + FFA)
   const monthlySavingsTarget = useMemo(() => {
     const ltss = jars.find((j) => j.id === 'ltss')?.limit || 0;
     const ffa = jars.find((j) => j.id === 'ffa')?.limit || 0;
-    const autoFundsSavings = savingsFunds
-      .filter((f) => !f.isCompleted)
-      .reduce((sum, f) => sum + f.monthlyAmount, 0);
-    return Math.max(ltss, autoFundsSavings) + ffa;
-  }, [jars, savingsFunds]);
+    return ltss + ffa;
+  }, [jars]);
 
   // Other variable spending targets (NEC excluding recurring + PLAY + EDU + GIVE)
   const baseVariableBudget = useMemo(() => {

@@ -270,20 +270,21 @@ export default function App() {
     return RANKS[0];
   }, [transactions.length]);
 
-  // Total monthly auto-deduction from savings funds (MẶC ĐỊNH CHI ĐỂ TIẾT KIỆM)
+  // Total monthly suggested savings target from savings funds (mục tiêu tích lũy gợi ý)
   const totalMonthlySavings = useMemo(() => {
     return savingsFunds
       .filter((f) => !f.isCompleted)
       .reduce((sum, f) => sum + f.monthlyAmount, 0);
   }, [savingsFunds]);
 
-  // Total spent calculation for badge evaluations (bao gồm cả khoản chi tự động trích tiết kiệm định kỳ)
+  // Total spent calculation for badge evaluations (chỉ tính chi tiêu tiêu hao thực tế, loại trừ thu nhập và chuyển ví)
   const totalBudget = useMemo(() => jars.reduce((sum, j) => sum + j.limit, 0), [jars]);
   const totalSpent = useMemo(
     () =>
-      transactions.filter((t) => t.type !== 'income').reduce((sum, t) => sum + Number(t.amount), 0) +
-      totalMonthlySavings,
-    [transactions, totalMonthlySavings]
+      transactions
+        .filter((t) => t.type !== 'income' && t.type !== 'transfer')
+        .reduce((sum, t) => sum + Number(t.amount), 0),
+    [transactions]
   );
   const totalIncome = useMemo(
     () => transactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0),
@@ -1371,7 +1372,7 @@ export default function App() {
     const jarSpentMap: Record<string, number> = {};
     jars.forEach((j) => (jarSpentMap[j.id] = 0));
     transactions.forEach((t) => {
-      if (t.type !== 'income' && jarSpentMap[t.jarId] !== undefined) {
+      if (t.type !== 'income' && t.type !== 'transfer' && jarSpentMap[t.jarId] !== undefined) {
         jarSpentMap[t.jarId] += Number(t.amount);
       }
     });

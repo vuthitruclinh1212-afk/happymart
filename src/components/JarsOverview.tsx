@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ArrowRight,
+  ArrowLeftRight,
   BarChart3,
   Clock,
   ShoppingCart,
@@ -38,12 +39,14 @@ interface JarsOverviewProps {
   hourlyWage: number;
   onSelectSubcategoryForScan: (jarId: string, subCategory: string) => void;
   onNavigateToIncome?: (walletId?: string) => void;
+  onNavigateToTransfer?: (sourceWalletId?: string, targetWalletId?: string) => void;
   onUpdateJarLimit: (jarId: string, newLimit: number) => void;
   onAddSubCategory: (jarId: string, subName: string) => void;
-  onAddSavingsFund?: (fund: Omit<SavingsFund, 'id' | 'createdAt'>) => void;
+  onAddSavingsFund?: (fund: Omit<SavingsFund, 'id' | 'createdAt'>, initialTransferAmount?: number) => void;
   onUpdateSavingsFund?: (fund: SavingsFund) => void;
   onDeleteSavingsFund?: (id: string) => void;
-  onDepositSavingsFund?: (fundId: string, amount: number) => void;
+  onDepositSavingsFund?: (fundId: string, amount: number, sourceWalletId?: string, targetWalletId?: string) => void;
+  onRelocateSavingsFundWallet?: (fundId: string, fromWalletId: string, toWalletId: string, amountToMove: number) => void;
 }
 
 export const JarsOverview: React.FC<JarsOverviewProps> = ({
@@ -56,12 +59,14 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
   hourlyWage,
   onSelectSubcategoryForScan,
   onNavigateToIncome,
+  onNavigateToTransfer,
   onUpdateJarLimit,
   onAddSubCategory,
   onAddSavingsFund,
   onUpdateSavingsFund,
   onDeleteSavingsFund,
   onDepositSavingsFund,
+  onRelocateSavingsFundWallet,
 }) => {
   const [editingJarId, setEditingJarId] = useState<string | null>(null);
   const [newLimitInput, setNewLimitInput] = useState<string>('');
@@ -371,17 +376,32 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                playCashRegister();
-                if (onNavigateToIncome) onNavigateToIncome();
-              }}
-              className="self-start sm:self-auto px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 shrink-0"
-              title="Ghi nhận khoản thu mới và nạp vào ví mong muốn"
-            >
-              <span>💰 Nạp Tiền Vào Ví</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  playCashRegister();
+                  if (onNavigateToIncome) onNavigateToIncome();
+                }}
+                className="self-start sm:self-auto px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 shrink-0"
+                title="Ghi nhận khoản thu mới và nạp vào ví mong muốn"
+              >
+                <span>💰 Nạp Tiền Vào Ví</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  playSoftPop();
+                  if (onNavigateToTransfer) onNavigateToTransfer();
+                }}
+                className="self-start sm:self-auto px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 shrink-0"
+                title="Chuyển tiền qua lại giữa các ví (Túi trái sang túi phải)"
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5 text-purple-200" />
+                <span>Chuyển Tiền Ví 🔄</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 mt-2">
@@ -428,18 +448,33 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      playSoftPop();
-                      if (onNavigateToIncome) onNavigateToIncome(w.id);
-                    }}
-                    className="shrink-0 px-2 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-extrabold rounded-xl text-[10px] transition-colors"
-                    title={`Nạp tiền vào ${w.name}`}
-                  >
-                    + Nạp
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playSoftPop();
+                        if (onNavigateToIncome) onNavigateToIncome(w.id);
+                      }}
+                      className="px-2 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-extrabold rounded-xl text-[10px] transition-colors"
+                      title={`Nạp tiền vào ${w.name}`}
+                    >
+                      + Nạp
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playSoftPop();
+                        if (onNavigateToTransfer) onNavigateToTransfer(w.id);
+                      }}
+                      className="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-900 font-extrabold rounded-xl text-[10px] transition-colors flex items-center gap-0.5"
+                      title={`Chuyển tiền từ ${w.name} sang ví khác`}
+                    >
+                      <span>🔄</span>
+                      <span>Chuyển</span>
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -785,6 +820,8 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
         onUpdateSavingsFund={onUpdateSavingsFund || (() => {})}
         onDeleteSavingsFund={onDeleteSavingsFund || (() => {})}
         onDepositSavingsFund={onDepositSavingsFund || (() => {})}
+        onRelocateSavingsFundWallet={onRelocateSavingsFundWallet}
+        onNavigateToTransfer={onNavigateToTransfer}
       />
 
       {/* The 6 Jars Grid */}
@@ -956,6 +993,20 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
                       ? 'CÁC MỤC TIẾT KIỆM CON (TỰ ĐỘNG ĐỊNH KỲ):'
                       : 'MỤC CON (BẤM ĐỂ QUÉT NHANH):'}
                   </span>
+                  {jar.id === 'ltss' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSoftPop();
+                        if (onNavigateToTransfer) onNavigateToTransfer();
+                      }}
+                      className="text-[10px] text-purple-700 hover:text-purple-900 font-extrabold flex items-center gap-1 hover:underline"
+                      title="Chuyển tiền qua lại giữa các nguồn tiền tiết kiệm"
+                    >
+                      <ArrowLeftRight className="w-3 h-3 text-purple-600" />
+                      <span>Chuyển nguồn tiết kiệm 🔄</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* For LTSS: Show dedicated savings funds */}

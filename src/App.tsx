@@ -77,7 +77,8 @@ export default function App() {
   const [scanPrefillJar, setScanPrefillJar] = useState<string>('nec');
   const [scanPrefillSub, setScanPrefillSub] = useState<string>('Ăn sáng');
   const [scanPrefillWalletId, setScanPrefillWalletId] = useState<string>('cash');
-  const [scanMode, setScanMode] = useState<'expense' | 'income'>('expense');
+  const [scanPrefillTargetWalletId, setScanPrefillTargetWalletId] = useState<string>('bank');
+  const [scanMode, setScanMode] = useState<'expense' | 'income' | 'transfer'>('expense');
 
   // Primary application data synced with LocalStorage & Firestore
   const [hourlyWage, setHourlyWage] = useState<number>(() =>
@@ -429,27 +430,30 @@ export default function App() {
     }
   };
 
-  // Handler: Add new transaction (Support cả Thu Nhập & Chi Tiêu vào nguồn tiền chỉ định)
+  // Handler: Add new transaction (Support cả Thu Nhập, Chi Tiêu, và Chuyển Tiền giữa các ví)
   const handleAddTransaction = (newTxData: {
     amount: number;
     jarId: string;
     subCategory: string;
     walletId: string;
+    targetWalletId?: string;
     mood: MoodId;
     note: string;
     date: string;
-    type?: 'expense' | 'income';
+    type?: 'expense' | 'income' | 'transfer';
     source?: string;
   }) => {
+    const isTransfer = newTxData.type === 'transfer';
     const isIncome = newTxData.type === 'income';
-    const workHours = Number((newTxData.amount / (hourlyWage || 1)).toFixed(1));
+    const workHours = isTransfer ? 0 : Number((newTxData.amount / (hourlyWage || 1)).toFixed(1));
 
     const newTx: Transaction = {
       id: `tx-${Date.now()}`,
       amount: newTxData.amount,
-      jarId: newTxData.jarId,
+      jarId: newTxData.jarId || 'ltss',
       subCategory: newTxData.subCategory,
       walletId: newTxData.walletId,
+      targetWalletId: newTxData.targetWalletId,
       mood: newTxData.mood,
       note: newTxData.note,
       date: newTxData.date,
@@ -459,60 +463,98 @@ export default function App() {
       source: newTxData.source,
     };
 
-    // Update balance for chosen wallet: Thu nhập thì cộng tiền (+), Chi tiêu thì trừ tiền (-)
-    setWallets((prev) =>
-      prev.map((w) => {
-        if (w.id === newTxData.walletId) {
+    if (isTransfer) {
+      const srcId = newTxData.walletId;
+      const tgtId = newTxData.targetWalletId;
+
+      // Update wallets: deduct source wallet, increase target wallet
+      setWallets((prev) =>
+        prev.map((w) => {
+          if (w.id === srcId) {
+            return { ...w, balance: Math.max(0, w.balance - newTxData.amount) };
+          }
+          if (w.id === tgtId) {
+            return { ...w, balance: w.balance + newTxData.amount };
+          }
+          return w;
+        })
+      );
+
+      setTransactions((prev) => [newTx, ...prev]);
+
+      if (activeUserId) {
+        saveSubDocument(activeUserId, 'transactions', newTx);
+        const srcW = wallets.find((w) => w.id === srcId);
+        if (srcW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...srcW,
+            balance: Math.max(0, srcW.balance - newTxData.amount),
+          });
+        }
+        const tgtW = wallets.find((w) => w.id === tgtId);
+        if (tgtW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...tgtW,
+            balance: tgtW.balance + newTxData.amount,
+          });
+        }
+      }
+    } else {
+      // Normal Income or Expense
+      setWallets((prev) =>
+        prev.map((w) => {
+          if (w.id === newTxData.walletId) {
+            const newBal = isIncome
+              ? w.balance + newTxData.amount
+              : Math.max(0, w.balance - newTxData.amount);
+            return { ...w, balance: newBal };
+          }
+          return w;
+        })
+      );
+
+      // Prepend transaction
+      setTransactions((prev) => [newTx, ...prev]);
+
+      // Save to user's isolated Firestore subcollections
+      if (activeUserId) {
+        saveSubDocument(activeUserId, 'transactions', newTx);
+        const w = wallets.find((item) => item.id === newTxData.walletId);
+        if (w) {
           const newBal = isIncome
             ? w.balance + newTxData.amount
             : Math.max(0, w.balance - newTxData.amount);
-          return { ...w, balance: newBal };
+          saveSubDocument(activeUserId, 'wallets', {
+            ...w,
+            balance: newBal,
+          });
         }
-        return w;
-      })
-    );
-
-    // Prepend transaction
-    setTransactions((prev) => [newTx, ...prev]);
-
-    // Save to user's isolated Firestore subcollections
-    if (activeUserId) {
-      saveSubDocument(activeUserId, 'transactions', newTx);
-      const w = wallets.find((item) => item.id === newTxData.walletId);
-      if (w) {
-        const newBal = isIncome
-          ? w.balance + newTxData.amount
-          : Math.max(0, w.balance - newTxData.amount);
-        saveSubDocument(activeUserId, 'wallets', {
-          ...w,
-          balance: newBal,
-        });
       }
-    }
 
-    // Check if this transaction pushes the jar over 90% (chỉ áp dụng cho CHI TIÊU)
-    if (!isIncome) {
-      const targetJar = jars.find((j) => j.id === newTxData.jarId);
-      if (targetJar && targetJar.limit > 0) {
-        const priorSpent = transactions
-          .filter((t) => t.type !== 'income' && t.jarId === targetJar.id)
-          .reduce((sum, t) => sum + Number(t.amount), 0);
-        const newTotalSpent = priorSpent + newTxData.amount;
-        const ratio = newTotalSpent / targetJar.limit;
+      // Check if this transaction pushes the jar over 90% (chỉ áp dụng cho CHI TIÊU)
+      if (!isIncome) {
+        const targetJar = jars.find((j) => j.id === newTxData.jarId);
+        if (targetJar && targetJar.limit > 0) {
+          const priorSpent = transactions
+            .filter((t) => t.type !== 'income' && t.type !== 'transfer' && t.jarId === targetJar.id)
+            .reduce((sum, t) => sum + Number(t.amount), 0);
+          const newTotalSpent = priorSpent + newTxData.amount;
+          const ratio = newTotalSpent / targetJar.limit;
 
-        if (ratio >= 0.9) {
-          const pct = Math.round(ratio * 100);
-          if (
-            typeof window !== 'undefined' &&
-            'Notification' in window &&
-            Notification.permission === 'granted'
-          ) {
-            try {
-              new Notification('🚨 Happy Mart Fin - Cảnh Báo Chi Tiêu 90%!', {
-                body: `Hũ "${targetJar.name}" đã đạt ${pct}% hạn mức ngân sách! Hãy cân nhắc điều chỉnh kịp thời.`,
-              });
-            } catch (err) {
-              console.error('Notification error:', err);
+          if (ratio >= 0.9) {
+            const pct = Math.round(ratio * 100);
+            if (
+              typeof window !== 'undefined' &&
+              'Notification' in window &&
+              Notification.permission === 'granted'
+            ) {
+              try {
+                new Notification('🚨 Happy Mart Fin - Cảnh Báo Chi Tiêu 90%!', {
+                  body: `Hũ "${targetJar.name}" đã đạt ${pct}% hạn mức ngân sách! Hãy cân nhắc điều chỉnh kịp thời.`,
+                });
+              } catch (err) {
+                console.error('Notification error:', err);
+              }
             }
           }
         }
@@ -535,10 +577,48 @@ export default function App() {
     }
   };
 
-  // Handler: Delete transaction (Hoàn trả tiền nếu xóa chi tiêu, hoặc trừ lại nếu xóa thu nhập)
+  // Handler: Delete transaction (Hoàn trả tiền nếu xóa chi tiêu, hoặc trừ lại nếu xóa thu nhập, hoàn cả 2 ví nếu xóa chuyển tiền)
   const handleDeleteTransaction = (id: string) => {
     const tx = transactions.find((t) => t.id === id);
     if (!tx) return;
+
+    if (tx.type === 'transfer') {
+      const srcId = tx.walletId;
+      const tgtId = tx.targetWalletId;
+
+      setWallets((prev) =>
+        prev.map((w) => {
+          if (w.id === srcId) {
+            return { ...w, balance: w.balance + tx.amount };
+          }
+          if (w.id === tgtId) {
+            return { ...w, balance: Math.max(0, w.balance - tx.amount) };
+          }
+          return w;
+        })
+      );
+
+      setTransactions((prev) => prev.filter((t) => t.id !== id));
+
+      if (activeUserId) {
+        deleteSubDocument(activeUserId, 'transactions', id);
+        const srcW = wallets.find((w) => w.id === srcId);
+        if (srcW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...srcW,
+            balance: srcW.balance + tx.amount,
+          });
+        }
+        const tgtW = wallets.find((w) => w.id === tgtId);
+        if (tgtW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...tgtW,
+            balance: Math.max(0, tgtW.balance - tx.amount),
+          });
+        }
+      }
+      return;
+    }
 
     const isIncome = tx.type === 'income';
 
@@ -577,24 +657,34 @@ export default function App() {
     const oldTx = transactions.find((t) => t.id === updatedTx.id);
     if (!oldTx) return;
 
-    const newWorkHours = Number((updatedTx.amount / (hourlyWage || 1)).toFixed(1));
+    const newWorkHours = updatedTx.type === 'transfer' ? 0 : Number((updatedTx.amount / (hourlyWage || 1)).toFixed(1));
     const finalTx: Transaction = { ...updatedTx, workHours: newWorkHours };
 
-    const oldIsIncome = oldTx.type === 'income';
-    const newIsIncome = updatedTx.type === 'income';
-
-    // Adjust wallet balances
+    // Revert old effect and apply new effect on wallets
     setWallets((prev) =>
       prev.map((w) => {
         let bal = w.balance;
-        // Revert old effect
-        if (w.id === oldTx.walletId) {
-          bal = oldIsIncome ? Math.max(0, bal - oldTx.amount) : bal + oldTx.amount;
+
+        // Revert old
+        if (oldTx.type === 'transfer') {
+          if (w.id === oldTx.walletId) bal += oldTx.amount;
+          if (w.id === oldTx.targetWalletId) bal = Math.max(0, bal - oldTx.amount);
+        } else if (oldTx.type === 'income') {
+          if (w.id === oldTx.walletId) bal = Math.max(0, bal - oldTx.amount);
+        } else {
+          if (w.id === oldTx.walletId) bal += oldTx.amount;
         }
-        // Apply new effect
-        if (w.id === updatedTx.walletId) {
-          bal = newIsIncome ? bal + updatedTx.amount : Math.max(0, bal - updatedTx.amount);
+
+        // Apply new
+        if (updatedTx.type === 'transfer') {
+          if (w.id === updatedTx.walletId) bal = Math.max(0, bal - updatedTx.amount);
+          if (w.id === updatedTx.targetWalletId) bal += updatedTx.amount;
+        } else if (updatedTx.type === 'income') {
+          if (w.id === updatedTx.walletId) bal += updatedTx.amount;
+        } else {
+          if (w.id === updatedTx.walletId) bal = Math.max(0, bal - updatedTx.amount);
         }
+
         return { ...w, balance: Math.max(0, bal) };
       })
     );
@@ -607,12 +697,24 @@ export default function App() {
       saveSubDocument(activeUserId, 'transactions', finalTx);
       wallets.forEach((w) => {
         let bal = w.balance;
-        if (w.id === oldTx.walletId) {
-          bal = oldIsIncome ? Math.max(0, bal - oldTx.amount) : bal + oldTx.amount;
+        if (oldTx.type === 'transfer') {
+          if (w.id === oldTx.walletId) bal += oldTx.amount;
+          if (w.id === oldTx.targetWalletId) bal = Math.max(0, bal - oldTx.amount);
+        } else if (oldTx.type === 'income') {
+          if (w.id === oldTx.walletId) bal = Math.max(0, bal - oldTx.amount);
+        } else {
+          if (w.id === oldTx.walletId) bal += oldTx.amount;
         }
-        if (w.id === updatedTx.walletId) {
-          bal = newIsIncome ? bal + updatedTx.amount : Math.max(0, bal - updatedTx.amount);
+
+        if (updatedTx.type === 'transfer') {
+          if (w.id === updatedTx.walletId) bal = Math.max(0, bal - updatedTx.amount);
+          if (w.id === updatedTx.targetWalletId) bal += updatedTx.amount;
+        } else if (updatedTx.type === 'income') {
+          if (w.id === updatedTx.walletId) bal += updatedTx.amount;
+        } else {
+          if (w.id === updatedTx.walletId) bal = Math.max(0, bal - updatedTx.amount);
         }
+
         saveSubDocument(activeUserId, 'wallets', { ...w, balance: Math.max(0, bal) });
       });
     }
@@ -666,6 +768,14 @@ export default function App() {
   const handleNavigateToIncome = (walletId?: string) => {
     if (walletId) setScanPrefillWalletId(walletId);
     setScanMode('income');
+    setTab('scanner');
+  };
+
+  // Handler: Navigate to scanner in Transfer mode (chuyển tiền giữa 2 ví)
+  const handleNavigateToTransfer = (sourceWalletId?: string, targetWalletId?: string) => {
+    if (sourceWalletId) setScanPrefillWalletId(sourceWalletId);
+    if (targetWalletId) setScanPrefillTargetWalletId(targetWalletId);
+    setScanMode('transfer');
     setTab('scanner');
   };
 
@@ -937,13 +1047,84 @@ export default function App() {
   };
 
   // Handlers: Savings Funds (Quỹ tiết kiệm mục tiêu con - Tự động trích định kỳ hàng tháng)
-  const handleAddSavingsFund = (fundData: Omit<SavingsFund, 'id' | 'createdAt'>) => {
+  const handleAddSavingsFund = (
+    fundData: Omit<SavingsFund, 'id' | 'createdAt'>,
+    initialTransferAmount?: number
+  ) => {
+    const initialSaved = (fundData.currentSaved || 0) + (initialTransferAmount || 0);
     const newFund: SavingsFund = {
       ...fundData,
       id: `fund-${Date.now()}`,
       createdAt: Date.now(),
+      currentSaved: initialSaved,
+      isCompleted: initialSaved >= fundData.targetAmount,
     };
     setSavingsFunds((prev) => [newFund, ...prev]);
+
+    // If an initial transfer was requested from sourceWalletId to target walletId
+    if (
+      initialTransferAmount &&
+      initialTransferAmount > 0 &&
+      fundData.sourceWalletId &&
+      fundData.walletId &&
+      fundData.sourceWalletId !== fundData.walletId
+    ) {
+      const srcId = fundData.sourceWalletId;
+      const tgtId = fundData.walletId;
+      const srcName = wallets.find((w) => w.id === srcId)?.name || 'Ví chuyển';
+      const tgtName = wallets.find((w) => w.id === tgtId)?.name || 'Ví nhận';
+
+      // Deduct source wallet, credit target wallet
+      setWallets((prev) =>
+        prev.map((w) => {
+          if (w.id === srcId) {
+            return { ...w, balance: Math.max(0, w.balance - initialTransferAmount) };
+          }
+          if (w.id === tgtId) {
+            return { ...w, balance: w.balance + initialTransferAmount };
+          }
+          return w;
+        })
+      );
+
+      // Create a transfer transaction record
+      const transferTx: Transaction = {
+        id: `tx-${Date.now()}`,
+        amount: initialTransferAmount,
+        jarId: 'ltss',
+        subCategory: `Tiết kiệm: ${fundData.name}`,
+        walletId: srcId,
+        targetWalletId: tgtId,
+        mood: 'love',
+        note: `Trích tiền tiết kiệm ban đầu cho quỹ "${fundData.name}" (${srcName} ➔ ${tgtName})`,
+        date: new Date().toISOString().split('T')[0],
+        workHours: 0,
+        createdAt: Date.now(),
+        type: 'transfer',
+        source: `${srcName} ➔ ${tgtName}`,
+      };
+
+      setTransactions((prev) => [transferTx, ...prev]);
+
+      if (activeUserId) {
+        saveSubDocument(activeUserId, 'transactions', transferTx);
+        const srcW = wallets.find((w) => w.id === srcId);
+        if (srcW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...srcW,
+            balance: Math.max(0, srcW.balance - initialTransferAmount),
+          });
+        }
+        const tgtW = wallets.find((w) => w.id === tgtId);
+        if (tgtW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...tgtW,
+            balance: tgtW.balance + initialTransferAmount,
+          });
+        }
+      }
+    }
+
     if (activeUserId) {
       saveSubDocument(activeUserId, 'savings_funds', newFund);
     }
@@ -965,7 +1146,12 @@ export default function App() {
     }
   };
 
-  const handleDepositSavingsFund = (fundId: string, amount: number) => {
+  const handleDepositSavingsFund = (
+    fundId: string,
+    amount: number,
+    sourceWalletId?: string,
+    targetWalletId?: string
+  ) => {
     const fund = savingsFunds.find((f) => f.id === fundId);
     if (!fund) return;
     const newSaved = fund.currentSaved + amount;
@@ -977,8 +1163,139 @@ export default function App() {
     setSavingsFunds((prev) =>
       prev.map((f) => (f.id === fundId ? updated : f))
     );
+
+    const srcId = sourceWalletId || fund.sourceWalletId;
+    const tgtId = targetWalletId || fund.walletId;
+
+    if (srcId && tgtId && srcId !== tgtId) {
+      const srcName = wallets.find((w) => w.id === srcId)?.name || 'Ví chuyển';
+      const tgtName = wallets.find((w) => w.id === tgtId)?.name || 'Ví nhận';
+
+      setWallets((prev) =>
+        prev.map((w) => {
+          if (w.id === srcId) {
+            return { ...w, balance: Math.max(0, w.balance - amount) };
+          }
+          if (w.id === tgtId) {
+            return { ...w, balance: w.balance + amount };
+          }
+          return w;
+        })
+      );
+
+      const transferTx: Transaction = {
+        id: `tx-${Date.now()}`,
+        amount,
+        jarId: 'ltss',
+        subCategory: `Tiết kiệm: ${fund.name}`,
+        walletId: srcId,
+        targetWalletId: tgtId,
+        mood: 'love',
+        note: `Nạp tiền tích lũy vào quỹ "${fund.name}" (${srcName} ➔ ${tgtName})`,
+        date: new Date().toISOString().split('T')[0],
+        workHours: 0,
+        createdAt: Date.now(),
+        type: 'transfer',
+        source: `${srcName} ➔ ${tgtName}`,
+      };
+
+      setTransactions((prev) => [transferTx, ...prev]);
+
+      if (activeUserId) {
+        saveSubDocument(activeUserId, 'transactions', transferTx);
+        const srcW = wallets.find((w) => w.id === srcId);
+        if (srcW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...srcW,
+            balance: Math.max(0, srcW.balance - amount),
+          });
+        }
+        const tgtW = wallets.find((w) => w.id === tgtId);
+        if (tgtW) {
+          saveSubDocument(activeUserId, 'wallets', {
+            ...tgtW,
+            balance: tgtW.balance + amount,
+          });
+        }
+      }
+    }
+
     if (activeUserId) {
       saveSubDocument(activeUserId, 'savings_funds', updated);
+    }
+  };
+
+  const handleRelocateSavingsFundWallet = (
+    fundId: string,
+    fromWalletId: string,
+    toWalletId: string,
+    amountToMove: number
+  ) => {
+    const fund = savingsFunds.find((f) => f.id === fundId);
+    if (!fund) return;
+    if (fromWalletId === toWalletId || amountToMove <= 0) return;
+
+    const fromWallet = wallets.find((w) => w.id === fromWalletId);
+    const toWallet = wallets.find((w) => w.id === toWalletId);
+    const fromName = fromWallet?.name || 'Ví chuyển';
+    const toName = toWallet?.name || 'Ví nhận';
+
+    // 1. Update wallet balances: deduct from fromWallet, credit to toWallet
+    setWallets((prev) =>
+      prev.map((w) => {
+        if (w.id === fromWalletId) {
+          return { ...w, balance: Math.max(0, w.balance - amountToMove) };
+        }
+        if (w.id === toWalletId) {
+          return { ...w, balance: w.balance + amountToMove };
+        }
+        return w;
+      })
+    );
+
+    // 2. Update fund's destination/holding wallet
+    const updatedFund: SavingsFund = {
+      ...fund,
+      walletId: toWalletId,
+    };
+    setSavingsFunds((prev) =>
+      prev.map((f) => (f.id === fundId ? updatedFund : f))
+    );
+
+    // 3. Create transfer transaction record
+    const transferTx: Transaction = {
+      id: `tx-${Date.now()}`,
+      amount: amountToMove,
+      jarId: 'ltss',
+      subCategory: `Đổi ví tiết kiệm: ${fund.name}`,
+      walletId: fromWalletId,
+      targetWalletId: toWalletId,
+      mood: 'love',
+      note: `Chuyển đổi nguồn tiền cất giữ quỹ "${fund.name}" từ ${fromName} sang ${toName}`,
+      date: new Date().toISOString().split('T')[0],
+      workHours: 0,
+      createdAt: Date.now(),
+      type: 'transfer',
+      source: `${fromName} ➔ ${toName}`,
+    };
+    setTransactions((prev) => [transferTx, ...prev]);
+
+    // 4. Cloud sync to Firestore
+    if (activeUserId) {
+      saveSubDocument(activeUserId, 'savings_funds', updatedFund);
+      saveSubDocument(activeUserId, 'transactions', transferTx);
+      if (fromWallet) {
+        saveSubDocument(activeUserId, 'wallets', {
+          ...fromWallet,
+          balance: Math.max(0, fromWallet.balance - amountToMove),
+        });
+      }
+      if (toWallet) {
+        saveSubDocument(activeUserId, 'wallets', {
+          ...toWallet,
+          balance: toWallet.balance + amountToMove,
+        });
+      }
     }
   };
 
@@ -1151,12 +1468,14 @@ export default function App() {
             hourlyWage={hourlyWage}
             onSelectSubcategoryForScan={handleSelectSubcategoryForScan}
             onNavigateToIncome={handleNavigateToIncome}
+            onNavigateToTransfer={handleNavigateToTransfer}
             onUpdateJarLimit={handleUpdateJarLimit}
             onAddSubCategory={handleAddSubCategory}
             onAddSavingsFund={handleAddSavingsFund}
             onUpdateSavingsFund={handleUpdateSavingsFund}
             onDeleteSavingsFund={handleDeleteSavingsFund}
             onDepositSavingsFund={handleDepositSavingsFund}
+            onRelocateSavingsFundWallet={handleRelocateSavingsFundWallet}
           />
         )}
 
@@ -1169,6 +1488,7 @@ export default function App() {
             initialJarId={scanPrefillJar}
             initialSubCategory={scanPrefillSub}
             initialWalletId={scanPrefillWalletId}
+            initialTargetWalletId={scanPrefillTargetWalletId}
             initialMode={scanMode}
             onModeChange={setScanMode}
             onAddTransaction={handleAddTransaction}

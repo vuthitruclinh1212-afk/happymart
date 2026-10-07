@@ -37,12 +37,13 @@ export interface Transaction {
   jarId: string;
   subCategory: string;
   walletId: string;
+  targetWalletId?: string; // Ví nhận khi chuyển tiền nội bộ giữa các ví
   mood: MoodId;
   note: string;
   date: string;
   workHours: number;
   createdAt: number;
-  type?: 'expense' | 'income';
+  type?: 'expense' | 'income' | 'transfer';
   source?: string;
 }
 
@@ -65,7 +66,8 @@ export interface SavingsFund {
   targetMonths: number; // Thời gian muốn tiết kiệm (số tháng)
   monthlyAmount: number; // Tự động tính: Math.ceil(targetAmount / targetMonths)
   currentSaved: number; // Số tiền đã tích lũy đến nay
-  walletId?: string; // Nguồn ví tích lũy (VD: bank, cash)
+  sourceWalletId?: string; // Ví trích tiền ra (VD: MB Bank)
+  walletId?: string; // Ví nhận cất giữ tiền quỹ (VD: Techcombank)
   createdAt: number;
   note?: string;
   isCompleted?: boolean;

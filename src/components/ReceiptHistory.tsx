@@ -22,7 +22,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
   onEditTransaction,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'expense' | 'income'>('all');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'expense' | 'income' | 'transfer'>('all');
   const [selectedJarFilter, setSelectedJarFilter] = useState<string>('all');
   const [selectedMoodFilter, setSelectedMoodFilter] = useState<string>('all');
   
@@ -34,7 +34,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
   // Edit transaction state
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [editAmountStr, setEditAmountStr] = useState<string>('');
-  const [editType, setEditType] = useState<'expense' | 'income'>('expense');
+  const [editType, setEditType] = useState<'expense' | 'income' | 'transfer'>('expense');
   const [editJarId, setEditJarId] = useState<string>('nec');
   const [editSubCategory, setEditSubCategory] = useState<string>('');
   const [editWalletId, setEditWalletId] = useState<string>('cash');
@@ -108,10 +108,13 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
   });
 
   const totalFilteredExpense = filtered
-    .filter((t) => t.type !== 'income')
+    .filter((t) => t.type !== 'income' && t.type !== 'transfer')
     .reduce((sum, t) => sum + t.amount, 0);
   const totalFilteredIncome = filtered
     .filter((t) => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const totalFilteredTransfer = filtered
+    .filter((t) => t.type === 'transfer')
     .reduce((sum, t) => sum + t.amount, 0);
   const netFilteredCashFlow = totalFilteredIncome - totalFilteredExpense;
   const totalFilteredHours = (totalFilteredExpense / (hourlyWage || 1)).toFixed(1);
@@ -386,7 +389,7 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                   : 'text-gray-500 hover:text-rose-700'
               }`}
             >
-              <span>🛒 Chi tiêu ({transactions.filter((t) => t.type !== 'income').length})</span>
+              <span>🛒 Chi tiêu ({transactions.filter((t) => t.type !== 'income' && t.type !== 'transfer').length})</span>
             </button>
             <button
               type="button"
@@ -401,6 +404,20 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
               }`}
             >
               <span>💰 Thu nhập ({transactions.filter((t) => t.type === 'income').length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                playSoftPop();
+                setSelectedTypeFilter('transfer');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition-all text-xs flex items-center gap-1 ${
+                selectedTypeFilter === 'transfer'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-2xs'
+                  : 'text-gray-500 hover:text-purple-700'
+              }`}
+            >
+              <span>🔄 Chuyển ví ({transactions.filter((t) => t.type === 'transfer').length})</span>
             </button>
           </div>
 
@@ -532,16 +549,20 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                 </div>
 
                 {filtered.map((t) => {
+                  const isTransfer = t.type === 'transfer';
                   const isIncome = t.type === 'income';
                   const jar = jars.find((j) => j.id === t.jarId);
                   const moodObj = MOODS.find((m) => m.id === t.mood);
                   const wallet = wallets.find((w) => w.id === t.walletId);
+                  const targetWallet = wallets.find((w) => w.id === t.targetWalletId);
 
                   return (
                     <div
                       key={t.id}
                       className={`grid grid-cols-12 items-center text-xs py-2 border-b rounded-lg px-1 transition-colors group ${
-                        isIncome
+                        isTransfer
+                          ? 'border-purple-100 hover:bg-purple-50/40 bg-purple-50/15'
+                          : isIncome
                           ? 'border-emerald-100 hover:bg-emerald-50/40 bg-emerald-50/15'
                           : 'border-gray-100 hover:bg-pink-50/40'
                       }`}
@@ -550,19 +571,27 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                         <div className="font-bold text-gray-800 flex items-center gap-1.5">
                           <span
                             className={`px-1.5 py-0.5 rounded-md font-black text-[9px] shrink-0 ${
-                              isIncome
+                              isTransfer
+                                ? 'bg-purple-100 text-purple-900 border border-purple-200'
+                                : isIncome
                                 ? 'bg-emerald-100 text-emerald-800'
                                 : 'bg-rose-100 text-rose-800'
                             }`}
                           >
-                            {isIncome ? '💰 THU' : '🛒 CHI'}
+                            {isTransfer ? '🔄 CHUYỂN VÍ' : isIncome ? '💰 THU' : '🛒 CHI'}
                           </span>
                           <span className="truncate">{t.subCategory}</span>
                         </div>
-                        <div className="text-[10px] text-gray-400 truncate mt-0.5">
-                          {isIncome
-                            ? `Nạp vào: ${wallet?.name || 'Ví'} ${wallet?.icon || '💵'} · ${t.date}`
-                            : `${jar?.name || 'Hũ'} · ${t.date} ${wallet?.icon || '💳'}`}
+                        <div className="text-[10px] text-gray-500 truncate mt-0.5">
+                          {isTransfer ? (
+                            <span className="font-semibold text-purple-900">
+                              Từ: {wallet?.name || 'Ví nguồn'} ➔ Đến: {targetWallet?.name || 'Ví đích'} · {t.date}
+                            </span>
+                          ) : isIncome ? (
+                            `Nạp vào: ${wallet?.name || 'Ví'} ${wallet?.icon || '💵'} · ${t.date}`
+                          ) : (
+                            `${jar?.name || 'Hũ'} · ${t.date} ${wallet?.icon || '💳'}`
+                          )}
                         </div>
                         {t.note && (
                           <div className="text-[10px] text-purple-700 italic truncate">
@@ -576,16 +605,20 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                       </div>
 
                       <div className="col-span-2 text-center text-[11px] font-bold text-purple-700">
-                        {isIncome ? '✨' : `⏱️ ${t.workHours}h`}
+                        {isTransfer ? '🔄 Chuyển' : isIncome ? '✨' : `⏱️ ${t.workHours}h`}
                       </div>
 
                       <div className="col-span-3 text-right flex items-center justify-end gap-1.5">
                         <div
                           className={`font-black tabular-nums ${
-                            isIncome ? 'text-emerald-600 font-extrabold' : 'text-gray-900'
+                            isTransfer
+                              ? 'text-purple-800 font-extrabold'
+                              : isIncome
+                              ? 'text-emerald-600 font-extrabold'
+                              : 'text-gray-900'
                           }`}
                         >
-                          {isIncome ? '+' : '-'}
+                          {isTransfer ? '🔄 ' : isIncome ? '+' : '-'}
                           {t.amount.toLocaleString('vi-VN')} đ
                         </div>
 
@@ -603,7 +636,9 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const confirmMsg = isIncome
+                            const confirmMsg = isTransfer
+                              ? `Xác nhận xóa giao dịch chuyển tiền "${t.subCategory}" (${t.amount.toLocaleString('vi-VN')} đ) và hoàn trả lại số dư cho cả 2 ví (${wallet?.name} được cộng lại, ${targetWallet?.name} bị trừ lại)?`
+                              : isIncome
                               ? `Xác nhận xóa khoản thu nhập "${t.subCategory}" (+${t.amount.toLocaleString('vi-VN')} đ) và trừ lại tiền khỏi ví ${wallet?.name || ''}?`
                               : `Xác nhận xóa giao dịch chi tiêu "${t.subCategory}" (-${t.amount.toLocaleString('vi-VN')} đ) và hoàn lại tiền vào ví?`;
                             if (window.confirm(confirmMsg)) {
@@ -640,6 +675,12 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                 <span>TỔNG TIỀN ĐÃ CHI:</span>
                 <span className="tabular-nums">-{totalFilteredExpense.toLocaleString('vi-VN')} đ</span>
               </div>
+              {totalFilteredTransfer > 0 && (
+                <div className="flex justify-between text-purple-700 font-bold">
+                  <span>TỔNG ĐIỀU CHUYỂN NỘI BỘ (TÚI TRÁI SANG PHẢI):</span>
+                  <span className="tabular-nums">🔄 {totalFilteredTransfer.toLocaleString('vi-VN')} đ</span>
+                </div>
+              )}
               <div className="flex justify-between text-base font-black text-gray-900 pt-2 border-t border-gray-200">
                 <span>DÒNG TIỀN RÒNG (NET):</span>
                 <span

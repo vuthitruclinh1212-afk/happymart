@@ -14,6 +14,7 @@ import {
   TrendingUp,
   PiggyBank,
   ArrowRight,
+  ArrowLeftRight,
   Info,
   ChevronDown,
   ChevronUp,
@@ -25,10 +26,12 @@ interface SavingsFundsManagerProps {
   savingsFunds: SavingsFund[];
   wallets: Wallet[];
   hourlyWage: number;
-  onAddSavingsFund: (fund: Omit<SavingsFund, 'id' | 'createdAt'>) => void;
+  onAddSavingsFund: (fund: Omit<SavingsFund, 'id' | 'createdAt'>, initialTransferAmount?: number) => void;
   onUpdateSavingsFund: (fund: SavingsFund) => void;
   onDeleteSavingsFund: (id: string) => void;
-  onDepositSavingsFund: (fundId: string, amount: number) => void;
+  onDepositSavingsFund: (fundId: string, amount: number, sourceWalletId?: string, targetWalletId?: string) => void;
+  onRelocateSavingsFundWallet?: (fundId: string, fromWalletId: string, toWalletId: string, amountToMove: number) => void;
+  onNavigateToTransfer?: (sourceWalletId?: string, targetWalletId?: string) => void;
 }
 
 const POPULAR_ICONS = ['📱', '🛡️', '💻', '🛵', '✈️', '🏠', '💍', '🏖️', '🎒', '🚗', '✨'];
@@ -41,6 +44,8 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
   onUpdateSavingsFund,
   onDeleteSavingsFund,
   onDepositSavingsFund,
+  onRelocateSavingsFundWallet,
+  onNavigateToTransfer,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingFund, setEditingFund] = useState<SavingsFund | null>(null);
@@ -51,15 +56,27 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
   const [targetAmountStr, setTargetAmountStr] = useState<string>('18000000');
   const [targetMonthsStr, setTargetMonthsStr] = useState<string>('6');
   const [currentSavedStr, setCurrentSavedStr] = useState<string>('0');
-  const [walletId, setWalletId] = useState<string>(wallets[0]?.id || 'bank');
+  const [sourceWalletId, setSourceWalletId] = useState<string>(wallets[0]?.id || 'cash');
+  const [walletId, setWalletId] = useState<string>(wallets[1]?.id || wallets[0]?.id || 'bank');
+  const [isInitialTransferEnabled, setIsInitialTransferEnabled] = useState<boolean>(true);
+  const [initialTransferAmountStr, setInitialTransferAmountStr] = useState<string>('');
   const [note, setNote] = useState<string>('');
 
   // Quick Deposit modal state
   const [depositFund, setDepositFund] = useState<SavingsFund | null>(null);
   const [depositAmountStr, setDepositAmountStr] = useState<string>('1000000');
+  const [depositSourceId, setDepositSourceId] = useState<string>(wallets[0]?.id || 'cash');
+  const [depositTargetId, setDepositTargetId] = useState<string>(wallets[1]?.id || wallets[0]?.id || 'bank');
   const [formError, setFormError] = useState<string | null>(null);
   const [depositError, setDepositError] = useState<string | null>(null);
   const [showFaqGuide, setShowFaqGuide] = useState<boolean>(true);
+
+  // Relocate holding wallet state (Đổi nguồn tiền cất giữ tiết kiệm)
+  const [relocateFund, setRelocateFund] = useState<SavingsFund | null>(null);
+  const [relocateFromId, setRelocateFromId] = useState<string>('');
+  const [relocateToId, setRelocateToId] = useState<string>('');
+  const [relocateAmountStr, setRelocateAmountStr] = useState<string>('');
+  const [relocateError, setRelocateError] = useState<string | null>(null);
 
   // Real-time automatic calculation
   const targetAmountNum = Math.max(0, Number(targetAmountStr) || 0);
@@ -90,7 +107,10 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
     setTargetAmountStr('20000000');
     setTargetMonthsStr('6');
     setCurrentSavedStr('0');
-    setWalletId(wallets[0]?.id || 'bank');
+    setSourceWalletId(wallets[0]?.id || 'cash');
+    setWalletId(wallets[1]?.id || wallets[0]?.id || 'bank');
+    setIsInitialTransferEnabled(true);
+    setInitialTransferAmountStr('');
     setNote('');
     setFormError(null);
     setIsModalOpen(true);
@@ -104,10 +124,32 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
     setTargetAmountStr(String(fund.targetAmount));
     setTargetMonthsStr(String(fund.targetMonths));
     setCurrentSavedStr(String(fund.currentSaved));
-    setWalletId(fund.walletId || wallets[0]?.id || 'bank');
+    setSourceWalletId(fund.sourceWalletId || wallets[0]?.id || 'cash');
+    setWalletId(fund.walletId || wallets[1]?.id || wallets[0]?.id || 'bank');
+    setIsInitialTransferEnabled(false);
+    setInitialTransferAmountStr('0');
     setNote(fund.note || '');
     setFormError(null);
     setIsModalOpen(true);
+  };
+
+  // Perform a 1-click monthly transfer from source wallet to destination wallet for a fund
+  const handleMonthlyTransfer = (fund: SavingsFund) => {
+    playSoftPop();
+    const srcId = fund.sourceWalletId || wallets[0]?.id;
+    const tgtId = fund.walletId || wallets[1]?.id || wallets[0]?.id;
+    const srcWallet = wallets.find((w) => w.id === srcId);
+    const tgtWallet = wallets.find((w) => w.id === tgtId);
+
+    const amount = fund.monthlyAmount;
+    const confirmMsg = `Thực hiện trích chuyển ${amount.toLocaleString('vi-VN')} đ định kỳ cho quỹ "${fund.name}"?\n- Ví nguồn: ${srcWallet?.name || 'Ví'} (trừ -${amount.toLocaleString('vi-VN')} đ)\n- Ví nhận: ${tgtWallet?.name || 'Ví'} (cộng +${amount.toLocaleString('vi-VN')} đ)`;
+
+    if (window.confirm(confirmMsg)) {
+      onDepositSavingsFund(fund.id, amount, srcId, tgtId);
+      playCashRegister();
+      playFanfare();
+      triggerConfetti();
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -122,6 +164,9 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
     }
 
     const currentSavedNum = Math.max(0, Number(currentSavedStr) || 0);
+    const initialTransferVal = isInitialTransferEnabled
+      ? Math.max(0, Number(initialTransferAmountStr) || calculatedMonthly)
+      : 0;
 
     if (editingFund) {
       onUpdateSavingsFund({
@@ -132,23 +177,37 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
         targetMonths: targetMonthsNum,
         monthlyAmount: calculatedMonthly,
         currentSaved: currentSavedNum,
+        sourceWalletId,
         walletId,
         note: note.trim(),
         isCompleted: currentSavedNum >= targetAmountNum,
       });
       playCashRegister();
     } else {
-      onAddSavingsFund({
-        name: name.trim(),
-        icon,
-        targetAmount: targetAmountNum,
-        targetMonths: targetMonthsNum,
-        monthlyAmount: calculatedMonthly,
-        currentSaved: currentSavedNum,
-        walletId,
-        note: note.trim(),
-        isCompleted: currentSavedNum >= targetAmountNum,
-      });
+      // Validate source wallet balance if doing initial transfer
+      const srcWallet = wallets.find((w) => w.id === sourceWalletId);
+      if (initialTransferVal > 0 && srcWallet && srcWallet.balance < initialTransferVal) {
+        const proceed = window.confirm(
+          `Số dư ${srcWallet.name} hiện tại là ${srcWallet.balance.toLocaleString('vi-VN')} đ (thấp hơn số tiền trích chuyển ${initialTransferVal.toLocaleString('vi-VN')} đ). Bạn vẫn muốn tạo quỹ và chuyển chứ?`
+        );
+        if (!proceed) return;
+      }
+
+      onAddSavingsFund(
+        {
+          name: name.trim(),
+          icon,
+          targetAmount: targetAmountNum,
+          targetMonths: targetMonthsNum,
+          monthlyAmount: calculatedMonthly,
+          currentSaved: currentSavedNum,
+          sourceWalletId,
+          walletId,
+          note: note.trim(),
+          isCompleted: currentSavedNum + initialTransferVal >= targetAmountNum,
+        },
+        initialTransferVal
+      );
       playFanfare();
       triggerConfetti();
     }
@@ -165,11 +224,49 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
       setDepositError('Vui lòng nhập số tiền tích lũy hợp lệ!');
       return;
     }
-    onDepositSavingsFund(depositFund.id, depVal);
+
+    const srcWallet = wallets.find((w) => w.id === depositSourceId);
+    if (srcWallet && srcWallet.balance < depVal && depositSourceId !== depositTargetId) {
+      const proceed = window.confirm(
+        `Số dư ${srcWallet.name} hiện tại là ${srcWallet.balance.toLocaleString('vi-VN')} đ (thấp hơn ${depVal.toLocaleString('vi-VN')} đ). Bạn vẫn muốn thực hiện nạp quỹ chứ?`
+      );
+      if (!proceed) return;
+    }
+
+    onDepositSavingsFund(depositFund.id, depVal, depositSourceId, depositTargetId);
     playCashRegister();
     triggerConfetti();
     setDepositError(null);
     setDepositFund(null);
+  };
+
+  const handleConfirmRelocate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!relocateFund) return;
+    const amount = Number(relocateAmountStr);
+    if (!amount || amount <= 0) {
+      setRelocateError('Vui lòng nhập số tiền cần chuyển nguồn lớn hơn 0!');
+      return;
+    }
+    if (relocateFromId === relocateToId) {
+      setRelocateError('Vui lòng chọn 2 nguồn tiền (ví) khác nhau!');
+      return;
+    }
+    const fromW = wallets.find((w) => w.id === relocateFromId);
+    if (fromW && fromW.balance < amount) {
+      const proceed = window.confirm(
+        `Số dư ${fromW.name} hiện tại là ${fromW.balance.toLocaleString('vi-VN')} đ (thấp hơn số tiền muốn chuyển ${amount.toLocaleString('vi-VN')} đ). Bạn vẫn muốn thực hiện chứ?`
+      );
+      if (!proceed) return;
+    }
+
+    if (onRelocateSavingsFundWallet) {
+      onRelocateSavingsFundWallet(relocateFund.id, relocateFromId, relocateToId, amount);
+    }
+    playCashRegister();
+    triggerConfetti();
+    setRelocateError(null);
+    setRelocateFund(null);
   };
 
   return (
@@ -455,6 +552,33 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
                 </div>
               </div>
 
+              {/* Inter-wallet Transfer Route Banner & Action */}
+              <div className="bg-indigo-50/80 border border-indigo-200 rounded-xl p-2.5 my-2 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[11px] text-indigo-950 font-bold truncate">
+                    <span className="text-indigo-600">🔄 Lộ trình:</span>
+                    <span className="text-rose-700 font-black truncate">{wallets.find((w) => w.id === fund.sourceWalletId)?.name || 'Ví chuyển'}</span>
+                    <span className="text-gray-400">➔</span>
+                    <span className="text-emerald-700 font-black truncate">{wallets.find((w) => w.id === fund.walletId)?.name || 'Ví nhận'}</span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 block">
+                    Túi trái ({fund.monthlyAmount.toLocaleString('vi-VN')} đ/tháng) sang túi phải
+                  </span>
+                </div>
+
+                {!fund.isCompleted && (
+                  <button
+                    type="button"
+                    onClick={() => handleMonthlyTransfer(fund)}
+                    className="self-start sm:self-auto px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black rounded-lg text-[10px] flex items-center gap-1 shadow-2xs transition-all active:scale-95 shrink-0"
+                    title="Chuyển ngay tiền định kỳ tháng này từ ví nguồn sang ví nhận"
+                  >
+                    <Coins className="w-3 h-3 text-purple-200" />
+                    <span>Trích tháng này ({fund.monthlyAmount.toLocaleString('vi-VN')} đ) 🔄</span>
+                  </button>
+                )}
+              </div>
+
               {/* Progress Bar & Current Status */}
               <div className="space-y-1.5 mt-3">
                 <div className="flex justify-between items-center text-xs">
@@ -488,19 +612,43 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
                     )}
                   </span>
 
-                  {/* Quick deposit button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playSoftPop();
-                      setDepositFund(fund);
-                      setDepositAmountStr(String(fund.monthlyAmount));
-                    }}
-                    className="text-xs font-extrabold text-purple-700 hover:text-purple-950 flex items-center gap-1 hover:underline"
-                  >
-                    <Coins className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Nạp thêm 💰</span>
-                  </button>
+                  <div className="flex items-center gap-2.5">
+                    {/* Quick deposit button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSoftPop();
+                        setDepositFund(fund);
+                        setDepositAmountStr(String(fund.monthlyAmount));
+                        setDepositSourceId(fund.sourceWalletId || wallets[0]?.id || 'cash');
+                        setDepositTargetId(fund.walletId || wallets[1]?.id || wallets[0]?.id || 'bank');
+                      }}
+                      className="text-xs font-extrabold text-purple-700 hover:text-purple-950 flex items-center gap-1 hover:underline"
+                    >
+                      <Coins className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Nạp thêm 💰</span>
+                    </button>
+
+                    {/* Relocate holding wallet button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSoftPop();
+                        setRelocateFund(fund);
+                        const curW = fund.walletId || wallets[1]?.id || wallets[0]?.id || 'bank';
+                        setRelocateFromId(curW);
+                        const otherW = wallets.find((w) => w.id !== curW);
+                        setRelocateToId(otherW ? otherW.id : (wallets[0]?.id || 'cash'));
+                        setRelocateAmountStr(String(fund.currentSaved > 0 ? fund.currentSaved : fund.monthlyAmount));
+                        setRelocateError(null);
+                      }}
+                      className="text-xs font-extrabold text-indigo-700 hover:text-indigo-950 flex items-center gap-1 hover:underline"
+                      title="Chuyển đổi nguồn tiền giữ quỹ từ tài khoản này sang tài khoản khác"
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Đổi ví giữ 🔄</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -642,35 +790,116 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
                 </div>
               </div>
 
-              {/* Current saved & Wallet destination */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Source & Destination Wallets */}
+              <div className="p-3.5 bg-purple-50/70 rounded-2xl border border-purple-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-black text-purple-950 text-xs flex items-center gap-1.5">
+                    <ArrowLeftRight className="w-3.5 h-3.5 text-purple-700" />
+                    <span>LỘ TRÌNH ĐIỀU CHUYỂN TIỀN TIẾT KIỆM (TÚI TRÁI ➔ TÚI PHẢI):</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block font-bold text-rose-800 text-[11px] mb-1">
+                      📤 VÍ TRÍCH TIỀN (NGUỒN / MB BANK - TRỪ):
+                    </label>
+                    <select
+                      value={sourceWalletId}
+                      onChange={(e) => setSourceWalletId(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-rose-300 rounded-xl font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    >
+                      {wallets.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.icon} {w.name} ({w.balance.toLocaleString('vi-VN')} đ)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-emerald-800 text-[11px] mb-1">
+                      📥 VÍ NHẬN CẤT TIỀN (ĐÍCH / TECHCOM - CỘNG):
+                    </label>
+                    <select
+                      value={walletId}
+                      onChange={(e) => setWalletId(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-emerald-300 rounded-xl font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    >
+                      {wallets.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.icon} {w.name} ({w.balance.toLocaleString('vi-VN')} đ)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Option to immediately perform initial monthly transfer on creation */}
+                {!editingFund && (
+                  <div className="p-3 bg-white rounded-xl border border-purple-200 space-y-2 mt-2">
+                    <label className="flex items-center gap-2 cursor-pointer font-black text-xs text-purple-900">
+                      <input
+                        type="checkbox"
+                        checked={isInitialTransferEnabled}
+                        onChange={(e) => setIsInitialTransferEnabled(e.target.checked)}
+                        className="w-4 h-4 text-purple-600 rounded-md focus:ring-purple-400"
+                      />
+                      <span>🔄 Trích chuyển tiền ngay đợt đầu vào quỹ tiết kiệm</span>
+                    </label>
+
+                    {isInitialTransferEnabled && (
+                      <div className="space-y-1.5 pl-6 pt-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-gray-600 font-bold shrink-0">
+                            Số tiền trích chuyển ngay (VNĐ):
+                          </span>
+                          <input
+                            type="number"
+                            placeholder={String(calculatedMonthly)}
+                            value={initialTransferAmountStr}
+                            onChange={(e) => setInitialTransferAmountStr(e.target.value)}
+                            className="w-full p-2 bg-purple-50/70 border border-purple-300 rounded-xl font-black text-purple-950 text-xs focus:bg-white"
+                          />
+                        </div>
+
+                        {/* Live preview */}
+                        <div className="text-[10px] text-purple-900 bg-purple-50 p-2 rounded-lg border border-purple-200">
+                          💡 <strong>Hiệu ứng tức thì:</strong>{' '}
+                          <span className="text-rose-700 font-bold">
+                            {wallets.find((w) => w.id === sourceWalletId)?.name || 'Ví nguồn'} bị trừ -
+                            {(Number(initialTransferAmountStr) || calculatedMonthly).toLocaleString('vi-VN')} đ
+                          </span>
+                          {' ➔ '}
+                          <span className="text-emerald-700 font-bold">
+                            {wallets.find((w) => w.id === walletId)?.name || 'Ví nhận'} được cộng +
+                            {(Number(initialTransferAmountStr) || calculatedMonthly).toLocaleString('vi-VN')} đ
+                          </span>
+                          . Quỹ <strong>{name || 'Mục tiêu'}</strong> được ghi nhận có sẵn{' '}
+                          {(Number(initialTransferAmountStr) || calculatedMonthly).toLocaleString('vi-VN')} đ tích lũy!
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Already saved existing prior to this app */}
+              <div className="grid grid-cols-1 gap-2">
                 <div>
                   <label className="block font-bold text-gray-600 mb-1">
-                    ĐÃ TÍCH LŨY SẴN HIỆN CÓ (NẾU CÓ):
+                    SỐ TIỀN ĐÃ CÓ SẴN TỪ TRƯỚC (NẾU CÓ, KHÔNG TRÍCH THÊM TỪ VÍ):
                   </label>
                   <input
                     type="number"
                     value={currentSavedStr}
                     onChange={(e) => setCurrentSavedStr(e.target.value)}
+                    placeholder="0"
                     className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-bold text-gray-800 focus:bg-white"
                   />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-600 mb-1">
-                    NƠI CẤT GIỮ TIỀN (VÍ):
-                  </label>
-                  <select
-                    value={walletId}
-                    onChange={(e) => setWalletId(e.target.value)}
-                    className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-bold text-gray-800 focus:bg-white"
-                  >
-                    {wallets.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.icon} {w.name}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="text-[10px] text-gray-400 block mt-0.5">
+                    Khoản tiền bạn đã tự cất giữ sẵn từ các tháng trước (không sinh giao dịch trừ ví).
+                  </span>
                 </div>
               </div>
 
@@ -679,7 +908,7 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
                 <label className="block font-bold text-gray-600 mb-1">GHI CHÚ / KẾ HOẠCH:</label>
                 <input
                   type="text"
-                  placeholder="VD: Trích lương ngày mùng 5 hàng tháng chuyển vào tài khoản tiết kiệm..."
+                  placeholder="VD: Trích chuyển 500k mỗi tháng từ MB Bank sang Techcombank để tiết kiệm..."
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-medium text-gray-800 focus:bg-white"
@@ -737,6 +966,44 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
                   ⚠️ {depositError}
                 </div>
               )}
+
+              {/* Source & Destination Wallets for Deposit */}
+              <div className="grid grid-cols-2 gap-2 bg-purple-50/70 p-2.5 rounded-xl border border-purple-200">
+                <div>
+                  <label className="block font-bold text-rose-800 text-[10px] mb-0.5">
+                    📤 VÍ TRÍCH (-):
+                  </label>
+                  <select
+                    value={depositSourceId}
+                    onChange={(e) => setDepositSourceId(e.target.value)}
+                    className="w-full p-1.5 bg-white border border-rose-200 rounded-lg font-bold text-[11px] text-gray-800"
+                  >
+                    {wallets.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.icon} {w.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-emerald-800 text-[10px] mb-0.5">
+                    📥 VÍ NHẬN (+):
+                  </label>
+                  <select
+                    value={depositTargetId}
+                    onChange={(e) => setDepositTargetId(e.target.value)}
+                    className="w-full p-1.5 bg-white border border-emerald-200 rounded-lg font-bold text-[11px] text-gray-800"
+                  >
+                    {wallets.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.icon} {w.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block font-bold text-gray-700 mb-1">SỐ TIỀN MUỐN NẠP THÊM (VNĐ):</label>
                 <input
@@ -761,6 +1028,14 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
                 ))}
               </div>
 
+              {Number(depositAmountStr) > 0 && (
+                <div className="text-[10px] text-purple-900 bg-purple-50 p-2 rounded-lg border border-purple-200">
+                  💡 <strong>Chuyển tiền:</strong> Trừ {Number(depositAmountStr).toLocaleString('vi-VN')} đ từ{' '}
+                  <strong>{wallets.find((w) => w.id === depositSourceId)?.name}</strong> và cộng vào{' '}
+                  <strong>{wallets.find((w) => w.id === depositTargetId)?.name}</strong>!
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-2 border-t">
                 <button
                   type="button"
@@ -774,6 +1049,139 @@ export const SavingsFundsManager: React.FC<SavingsFundsManagerProps> = ({
                   className="px-4 py-1.5 bg-purple-600 text-white font-black rounded-xl hover:bg-purple-700"
                 >
                   Xác Nhận Nạp 💰
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Chuyển đổi nguồn tiền giữ quỹ (Chuyển tiền tiết kiệm từ túi này sang túi nọ) */}
+      {relocateFund && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-3 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border-2 border-indigo-200 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{relocateFund.icon}</span>
+                <div>
+                  <h3 className="font-black text-gray-900 text-sm">
+                    Đổi Nguồn Tiền Giữ Tiết Kiệm: {relocateFund.name}
+                  </h3>
+                  <span className="text-[10px] text-gray-500">
+                    Chuyển tiền cất giữ từ túi trái sang túi phải
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRelocateFund(null)}
+                className="p-1 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRelocate} className="space-y-3.5 text-xs">
+              {relocateError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl font-bold">
+                  ⚠️ {relocateError}
+                </div>
+              )}
+
+              <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-2xl text-[11px] text-indigo-950 font-medium leading-relaxed">
+                🛡️ <strong>Tính năng điều chuyển nguồn tiền:</strong> Bạn có thể chuyển số tiền đã tiết kiệm được ({relocateFund.currentSaved.toLocaleString('vi-VN')} đ) từ ví hiện tại (ví dụ MB Bank) sang ví nhận mới (ví dụ Techcombank, Tiền mặt) mà không ảnh hưởng tới tiến độ tích lũy!
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-rose-800 text-[11px] mb-1">
+                    📤 VÍ CŨ ĐANG GIỮ (TRỪ):
+                  </label>
+                  <select
+                    value={relocateFromId}
+                    onChange={(e) => setRelocateFromId(e.target.value)}
+                    className="w-full p-2 bg-gray-50 border border-rose-300 rounded-xl font-bold text-gray-800"
+                  >
+                    {wallets.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.icon} {w.name} ({w.balance.toLocaleString('vi-VN')} đ)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-emerald-800 text-[11px] mb-1">
+                    📥 VÍ MỚI MUỐN CHUYỂN SANG (CỘNG):
+                  </label>
+                  <select
+                    value={relocateToId}
+                    onChange={(e) => setRelocateToId(e.target.value)}
+                    className="w-full p-2 bg-gray-50 border border-emerald-300 rounded-xl font-bold text-gray-800"
+                  >
+                    {wallets.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.icon} {w.name} ({w.balance.toLocaleString('vi-VN')} đ)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-gray-700">SỐ TIỀN MUỐN CHUYỂN NGUỒN (VNĐ):</label>
+                  <button
+                    type="button"
+                    onClick={() => setRelocateAmountStr(String(relocateFund.currentSaved))}
+                    className="text-[10px] text-indigo-600 font-extrabold hover:underline"
+                  >
+                    Toàn bộ ({relocateFund.currentSaved.toLocaleString('vi-VN')} đ)
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  value={relocateAmountStr}
+                  onChange={(e) => setRelocateAmountStr(e.target.value)}
+                  className="w-full p-2.5 bg-indigo-50/60 border border-indigo-300 rounded-xl font-black text-indigo-950 text-base"
+                  required
+                />
+              </div>
+
+              {Number(relocateAmountStr) > 0 && (
+                <div className="text-[10px] text-indigo-950 bg-indigo-50 p-2.5 rounded-xl border border-indigo-200 space-y-1">
+                  <div>
+                    🔄 <strong>Lộ trình điều chuyển:</strong>{' '}
+                    <span className="text-rose-700 font-bold">
+                      {wallets.find((w) => w.id === relocateFromId)?.name}
+                    </span>{' '}
+                    (-{Number(relocateAmountStr).toLocaleString('vi-VN')} đ){' ➔ '}
+                    <span className="text-emerald-700 font-bold">
+                      {wallets.find((w) => w.id === relocateToId)?.name}
+                    </span>{' '}
+                    (+{Number(relocateAmountStr).toLocaleString('vi-VN')} đ)
+                  </div>
+                  <div className="text-gray-500">
+                    Ví lưu giữ quỹ <strong>{relocateFund.name}</strong> sẽ được cập nhật sang{' '}
+                    <strong>{wallets.find((w) => w.id === relocateToId)?.name}</strong>!
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setRelocateFund(null)}
+                  className="px-3 py-1.5 text-gray-600 font-bold"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-indigo-600 text-white font-black rounded-xl hover:bg-indigo-700 flex items-center gap-1.5 shadow-sm"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                  <span>Xác Nhận Đổi Nguồn 🔄</span>
                 </button>
               </div>
             </form>

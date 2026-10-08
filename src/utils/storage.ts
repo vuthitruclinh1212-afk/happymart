@@ -409,17 +409,37 @@ export const getLocalDateString = (d: Date = new Date()): string => {
 };
 
 /**
- * Normalizes any date string (ISO, timestamp, slash-separated) to YYYY-MM-DD
+ * Normalizes any date string (ISO, timestamp, slash-separated, localized) to YYYY-MM-DD
  */
-export const normalizeDateString = (rawDate: string | undefined): string => {
+export const normalizeDateString = (rawDate: string | number | undefined): string => {
   if (!rawDate) return '';
-  if (rawDate.includes('T')) return rawDate.split('T')[0];
-  const parts = rawDate.split(/[-/]/);
-  if (parts.length === 3) {
-    const y = parts[0].length === 4 ? parts[0] : parts[2];
-    const m = parts[1].padStart(2, '0');
-    const d = (parts[0].length === 4 ? parts[2] : parts[0]).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+  if (typeof rawDate === 'number') {
+    return getLocalDateString(new Date(rawDate));
   }
-  return rawDate;
+  const str = String(rawDate).trim();
+  if (!str) return '';
+  if (/^\d{11,}$/.test(str)) {
+    return getLocalDateString(new Date(Number(str)));
+  }
+  if (str.includes('T')) {
+    return str.split('T')[0];
+  }
+  const parts = str.split(/[-/.]/).map((p) => p.trim());
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      const y = parts[0];
+      const m = parts[1].padStart(2, '0');
+      const d = parts[2].padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    if (parts[2].length === 4) {
+      // DD/MM/YYYY
+      const y = parts[2];
+      const m = parts[1].padStart(2, '0');
+      const d = parts[0].padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+  return str;
 };

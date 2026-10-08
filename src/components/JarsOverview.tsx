@@ -244,7 +244,7 @@ export const JarsOverview: React.FC<JarsOverviewProps> = ({
 
       data.push({
         dateStr,
-        dateLabel: i === 0 ? 'Hôm nay' : dayLabel,
+        dateLabel: i === 0 ? 'Hôm nay' : i === 1 ? 'Hôm qua' : dayLabel,
         dailySpent,
         dailyIncome,
         cumulativeSpent: cumulativeExpense,

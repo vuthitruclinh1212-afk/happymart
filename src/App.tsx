@@ -140,6 +140,79 @@ export default function App() {
     return currentUser ? getCanonicalUserId(currentUser) : null;
   }, [currentUser]);
 
+  // Unified merger of cloud data with local data so nothing is ever overwritten or lost
+  const applyCloudData = (cloudData: any, currentUserId: string | null) => {
+    if (!cloudData) return;
+    setUserProfile(cloudData.userProfile);
+    setHourlyWage(cloudData.hourlyWage);
+    setRolloverSavings(cloudData.rolloverSavings);
+    if (cloudData.jars && cloudData.jars.length > 0) {
+      setJars(cloudData.jars);
+    }
+    if (cloudData.wallets && cloudData.wallets.length > 0) {
+      setWallets(cloudData.wallets);
+    }
+    // MERGE transactions with local transactions so nothing just added locally gets lost!
+    setTransactions((prevLocal) => {
+      const map = new Map<string, Transaction>();
+      // 1. Put cloud transactions
+      (cloudData.transactions || []).forEach((t: Transaction) => {
+        if (t && t.id) map.set(t.id, t);
+      });
+      // 2. Merge local transactions
+      prevLocal.forEach((t) => {
+        if (t && t.id && !map.has(t.id)) {
+          map.set(t.id, t);
+          if (currentUserId) {
+            saveSubDocument(currentUserId, 'transactions', t);
+          }
+        }
+      });
+      const list = Array.from(map.values()).sort(
+        (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+      );
+      saveStored('hm_txs', list);
+      return list;
+    });
+
+    if (cloudData.recurringExpenses && cloudData.recurringExpenses.length > 0) {
+      setRecurringExpenses(cloudData.recurringExpenses);
+    }
+    setWishlist(cloudData.wishlist || []);
+    setAssets(cloudData.assets || []);
+    
+    // MERGE diary entries
+    setDiaryEntries((prevLocal) => {
+      const map = new Map<string, DiaryEntry>();
+      (cloudData.diaryEntries || []).forEach((d: DiaryEntry) => { if (d && d.id) map.set(d.id, d); });
+      prevLocal.forEach((d) => {
+        if (d && d.id && !map.has(d.id)) {
+          map.set(d.id, d);
+          if (currentUserId) {
+            saveSubDocument(currentUserId, 'diary', d);
+          }
+        }
+      });
+      const list = Array.from(map.values());
+      saveStored('hm_diary', list);
+      return list;
+    });
+
+    if (cloudData.songs && cloudData.songs.length > 0) {
+      setSongs(cloudData.songs);
+    }
+    if (cloudData.savingsFunds && cloudData.savingsFunds.length > 0) {
+      setSavingsFunds((prevLocal) => {
+        const map = new Map<string, SavingsFund>();
+        cloudData.savingsFunds.forEach((f: SavingsFund) => { if (f && f.id) map.set(f.id, f); });
+        prevLocal.forEach((f) => {
+          if (f && f.id && !map.has(f.id)) map.set(f.id, f);
+        });
+        return Array.from(map.values());
+      });
+    }
+  };
+
   // Handler to reload full user data from cloud (cross-device sync)
   const handleReloadCloudData = async () => {
     if (!currentUser) return;
@@ -147,22 +220,7 @@ export default function App() {
     try {
       const cloudData = await loadUserDataFromFirestore(currentUser);
       if (cloudData) {
-        setUserProfile(cloudData.userProfile);
-        setHourlyWage(cloudData.hourlyWage);
-        setRolloverSavings(cloudData.rolloverSavings);
-        setJars(cloudData.jars);
-        setWallets(cloudData.wallets);
-        setTransactions(cloudData.transactions);
-        setRecurringExpenses(cloudData.recurringExpenses);
-        setWishlist(cloudData.wishlist);
-        setAssets(cloudData.assets);
-        setDiaryEntries(cloudData.diaryEntries);
-        if (cloudData.songs) {
-          setSongs(cloudData.songs);
-        }
-        if (cloudData.savingsFunds) {
-          setSavingsFunds(cloudData.savingsFunds);
-        }
+        applyCloudData(cloudData, activeUserId);
       }
     } catch (err) {
       console.error('Failed to reload cloud data:', err);
@@ -180,22 +238,8 @@ export default function App() {
         try {
           const cloudData = await loadUserDataFromFirestore(user);
           if (cloudData) {
-            setUserProfile(cloudData.userProfile);
-            setHourlyWage(cloudData.hourlyWage);
-            setRolloverSavings(cloudData.rolloverSavings);
-            setJars(cloudData.jars);
-            setWallets(cloudData.wallets);
-            setTransactions(cloudData.transactions);
-            setRecurringExpenses(cloudData.recurringExpenses);
-            setWishlist(cloudData.wishlist);
-            setAssets(cloudData.assets);
-            setDiaryEntries(cloudData.diaryEntries);
-            if (cloudData.songs) {
-              setSongs(cloudData.songs);
-            }
-            if (cloudData.savingsFunds) {
-              setSavingsFunds(cloudData.savingsFunds);
-            }
+            const uid = getCanonicalUserId(user);
+            applyCloudData(cloudData, uid);
           }
         } catch (err) {
           console.error('Failed to load user cloud data from Firestore:', err);
@@ -471,8 +515,8 @@ export default function App() {
       const tgtId = newTxData.targetWalletId;
 
       // Update wallets: deduct source wallet, increase target wallet
-      setWallets((prev) =>
-        prev.map((w) => {
+      setWallets((prev) => {
+        const next = prev.map((w) => {
           if (w.id === srcId) {
             return { ...w, balance: Math.max(0, w.balance - newTxData.amount) };
           }
@@ -480,10 +524,16 @@ export default function App() {
             return { ...w, balance: w.balance + newTxData.amount };
           }
           return w;
-        })
-      );
+        });
+        saveStored('hm_wallets', next);
+        return next;
+      });
 
-      setTransactions((prev) => [newTx, ...prev]);
+      setTransactions((prev) => {
+        const next = [newTx, ...prev];
+        saveStored('hm_txs', next);
+        return next;
+      });
 
       if (activeUserId) {
         saveSubDocument(activeUserId, 'transactions', newTx);
@@ -504,8 +554,8 @@ export default function App() {
       }
     } else {
       // Normal Income or Expense
-      setWallets((prev) =>
-        prev.map((w) => {
+      setWallets((prev) => {
+        const next = prev.map((w) => {
           if (w.id === newTxData.walletId) {
             const newBal = isIncome
               ? w.balance + newTxData.amount
@@ -513,11 +563,17 @@ export default function App() {
             return { ...w, balance: newBal };
           }
           return w;
-        })
-      );
+        });
+        saveStored('hm_wallets', next);
+        return next;
+      });
 
-      // Prepend transaction
-      setTransactions((prev) => [newTx, ...prev]);
+      // Prepend transaction and save stored
+      setTransactions((prev) => {
+        const next = [newTx, ...prev];
+        saveStored('hm_txs', next);
+        return next;
+      });
 
       // Save to user's isolated Firestore subcollections
       if (activeUserId) {

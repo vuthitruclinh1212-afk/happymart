@@ -81,201 +81,154 @@ export async function loadUserDataFromFirestore(
   const userDocPath = `users/${canonicalId}`;
 
   try {
-    // 1. Try to find user document by canonicalId (e.g. u_vuongnguyet65_gmail_com)
-    let sourceId = canonicalId;
-    let userDocRef = doc(db, 'users', canonicalId);
-    let userSnap = await getDoc(userDocRef);
+    // 1. Gather all candidate IDs associated with this user
+    const candidateIds = Array.from(new Set([canonicalId, email, userObj.uid].filter(Boolean)));
+    
+    // Find first existing user document among candidates
+    let primarySnap: any = null;
+    let foundProfileData: any = null;
 
-    // Fallback 1: check if raw email without prefix was used
-    if (!userSnap.exists() && email) {
-      const emailDocRef = doc(db, 'users', email);
-      const emailSnap = await getDoc(emailDocRef);
-      if (emailSnap.exists()) {
-        userDocRef = emailDocRef;
-        userSnap = emailSnap;
-        sourceId = email;
+    for (const cid of candidateIds) {
+      try {
+        const snap = await getDoc(doc(db, 'users', cid));
+        if (snap.exists()) {
+          primarySnap = snap;
+          foundProfileData = snap.data();
+          break;
+        }
+      } catch (e) {
+        // Continue fallback
       }
     }
 
-    // Fallback 2: check if Firebase UID was used
-    if (!userSnap.exists() && userObj.uid && userObj.uid !== canonicalId) {
-      const legacyRef = doc(db, 'users', userObj.uid);
-      const legacySnap = await getDoc(legacyRef);
-      if (legacySnap.exists()) {
-        userDocRef = legacyRef;
-        userSnap = legacySnap;
-        sourceId = userObj.uid;
-      }
-    }
+    // 2. Query subcollections across ALL candidates and merge uniquely so no data is ever lost
+    const txMap = new Map<string, Transaction>();
+    const walletMap = new Map<string, Wallet>();
+    const jarMap = new Map<string, Jar>();
+    const recMap = new Map<string, RecurringExpense>();
+    const wishMap = new Map<string, WishlistItem>();
+    const assetMap = new Map<string, AssetDepreciation>();
+    const diaryMap = new Map<string, DiaryEntry>();
+    const songMap = new Map<string, FavoriteSong>();
+    const savingsMap = new Map<string, SavingsFund>();
 
-    // 2. Fetch all subcollections from sourceId (or canonicalId)
-    // Run queries safely
-    const [
-      jarsSnap,
-      walletsSnap,
-      txsSnap,
-      recSnap,
-      wishSnap,
-      assetsSnap,
-      diarySnap,
-      songsSnap,
-      savingsSnap,
-    ] = await Promise.all([
-      getDocs(collection(db, 'users', sourceId, 'jars')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'wallets')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'transactions')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'recurring')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'wishlist')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'assets')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'diary')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'songs')).catch(() => ({ docs: [] } as any)),
-      getDocs(collection(db, 'users', sourceId, 'savings_funds')).catch(() => ({ docs: [] } as any)),
-    ]);
+    await Promise.all(
+      candidateIds.map(async (cid) => {
+        try {
+          const [
+            jarsSnap,
+            walletsSnap,
+            txsSnap,
+            recSnap,
+            wishSnap,
+            assetsSnap,
+            diarySnap,
+            songsSnap,
+            savingsSnap,
+          ] = await Promise.all([
+            getDocs(collection(db, 'users', cid, 'jars')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'wallets')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'transactions')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'recurring')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'wishlist')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'assets')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'diary')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'songs')).catch(() => ({ docs: [] } as any)),
+            getDocs(collection(db, 'users', cid, 'savings_funds')).catch(() => ({ docs: [] } as any)),
+          ]);
 
-    const jars: Jar[] = jarsSnap.docs.map((d: any) => d.data() as Jar);
-    const wallets: Wallet[] = walletsSnap.docs.map((d: any) => d.data() as Wallet);
-    const transactions: Transaction[] = txsSnap.docs.map((d: any) => d.data() as Transaction);
-    const recurringExpenses: RecurringExpense[] = recSnap.docs.map((d: any) => d.data() as RecurringExpense);
-    const wishlist: WishlistItem[] = wishSnap.docs.map((d: any) => d.data() as WishlistItem);
-    const assets: AssetDepreciation[] = assetsSnap.docs.map((d: any) => d.data() as AssetDepreciation);
-    const diaryEntries: DiaryEntry[] = diarySnap.docs.map((d: any) => d.data() as DiaryEntry);
-    const songs: FavoriteSong[] = songsSnap.docs.map((d: any) => d.data() as FavoriteSong);
-    const savingsFunds: SavingsFund[] = savingsSnap.docs.map((d: any) => d.data() as SavingsFund);
+          jarsSnap.docs.forEach((d: any) => { const item = d.data() as Jar; if (item && item.id) jarMap.set(item.id, item); });
+          walletsSnap.docs.forEach((d: any) => { const item = d.data() as Wallet; if (item && item.id) walletMap.set(item.id, item); });
+          txsSnap.docs.forEach((d: any) => { const item = d.data() as Transaction; if (item && item.id) txMap.set(item.id, item); });
+          recSnap.docs.forEach((d: any) => { const item = d.data() as RecurringExpense; if (item && item.id) recMap.set(item.id, item); });
+          wishSnap.docs.forEach((d: any) => { const item = d.data() as WishlistItem; if (item && item.id) wishMap.set(item.id, item); });
+          assetsSnap.docs.forEach((d: any) => { const item = d.data() as AssetDepreciation; if (item && item.id) assetMap.set(item.id, item); });
+          diarySnap.docs.forEach((d: any) => { const item = d.data() as DiaryEntry; if (item && item.id) diaryMap.set(item.id, item); });
+          songsSnap.docs.forEach((d: any) => { const item = d.data() as FavoriteSong; if (item && item.id) songMap.set(item.id, item); });
+          savingsSnap.docs.forEach((d: any) => { const item = d.data() as SavingsFund; if (item && item.id) savingsMap.set(item.id, item); });
+        } catch (err) {
+          console.warn(`[firebaseSync] Error reading subcollections for candidate ${cid}:`, err);
+        }
+      })
+    );
 
-    // Sort transactions by date/createdAt desc
+    const jars: Jar[] = Array.from(jarMap.values());
+    const wallets: Wallet[] = Array.from(walletMap.values());
+    const transactions: Transaction[] = Array.from(txMap.values());
+    const recurringExpenses: RecurringExpense[] = Array.from(recMap.values());
+    const wishlist: WishlistItem[] = Array.from(wishMap.values());
+    const assets: AssetDepreciation[] = Array.from(assetMap.values());
+    const diaryEntries: DiaryEntry[] = Array.from(diaryMap.values());
+    const songs: FavoriteSong[] = Array.from(songMap.values());
+    const savingsFunds: SavingsFund[] = Array.from(savingsMap.values());
+
+    // Sort transactions by createdAt/date desc
     transactions.sort((a: Transaction, b: Transaction) => (b.createdAt || 0) - (a.createdAt || 0));
 
     const emailPrefix = email ? email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() : '';
     const memberCode = emailPrefix ? `HM-${emailPrefix}` : `HM-${canonicalId.slice(0, 6).toUpperCase()}`;
 
-    // 3. If the user document exists, extract stored profile
-    if (userSnap.exists()) {
-      const userData = userSnap.data();
-      const userProfile: UserProfile = {
-        uid: canonicalId,
-        email: userData.email || email,
-        name: userData.displayName || userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Siêu Thị'),
-        avatar: userData.avatar || '🥑',
-        memberId: userData.memberId || memberCode,
-        joinedDate: userData.joinedDate || new Date().toLocaleDateString('vi-VN'),
-        monthlyWorkHours: Number(userData.monthlyWorkHours) || 160,
-        currentStreakDays: Number(userData.currentStreakDays) || 1,
-        longestStreakDays: Number(userData.longestStreakDays) || 1,
-        lastActiveDate: userData.lastActiveDate || new Date().toISOString().split('T')[0],
-      };
-
-      const hourlyWage = Number(userData.hourlyWage) || 50000;
-      const rolloverSavings = Number(userData.rolloverSavings) || 0;
-
-      const resultData: FullUserData = {
-        userProfile,
-        hourlyWage,
-        rolloverSavings,
-        jars: jars.length > 0 ? jars : INITIAL_JARS,
-        wallets: wallets.length > 0 ? wallets : INITIAL_WALLETS,
-        transactions, // Keep ALL loaded transactions, never overwrite
-        recurringExpenses: recurringExpenses.length > 0 ? recurringExpenses : INITIAL_RECURRING,
-        wishlist,
-        assets,
-        diaryEntries,
-        songs: songs.length > 0 ? songs : INITIAL_SONGS,
-        savingsFunds: savingsFunds.length > 0 ? savingsFunds : INITIAL_SAVINGS_FUNDS,
-        canonicalId,
-      };
-
-      console.log(`[firebaseSync] Loaded existing user data for ${canonicalId}:`, {
-        transactionsCount: transactions.length,
-        jarsCount: jars.length,
-        walletsCount: wallets.length,
-        recurringCount: recurringExpenses.length,
-      });
-
-      return resultData;
-    }
-
-    // 4. Case where userSnap does NOT exist, but subcollections DO exist
-    const hasExistingSubcollections = jars.length > 0 || wallets.length > 0 || transactions.length > 0;
-    if (hasExistingSubcollections) {
-      const recoveredProfile: UserProfile = {
-        uid: canonicalId,
-        email: email,
-        name: userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Siêu Thị'),
-        avatar: '🥑',
-        memberId: memberCode,
-        joinedDate: new Date().toLocaleDateString('vi-VN'),
-        monthlyWorkHours: 160,
-        currentStreakDays: 1,
-        longestStreakDays: 1,
-        lastActiveDate: new Date().toISOString().split('T')[0],
-      };
-
-      // Create root user document so it exists for next time, but DO NOT overwrite subcollections
-      await setDoc(doc(db, 'users', canonicalId), {
-        uid: canonicalId,
-        email,
-        displayName: recoveredProfile.name,
-        avatar: recoveredProfile.avatar,
-        memberId: memberCode,
-        joinedDate: recoveredProfile.joinedDate,
-        monthlyWorkHours: 160,
-        currentStreakDays: 1,
-        longestStreakDays: 1,
-        lastActiveDate: recoveredProfile.lastActiveDate,
-        hourlyWage: 50000,
-        rolloverSavings: 0,
-        updatedAt: Date.now(),
-      }, { merge: true });
-
-      return {
-        userProfile: recoveredProfile,
-        hourlyWage: 50000,
-        rolloverSavings: 0,
-        jars: jars.length > 0 ? jars : INITIAL_JARS,
-        wallets: wallets.length > 0 ? wallets : INITIAL_WALLETS,
-        transactions,
-        recurringExpenses: recurringExpenses.length > 0 ? recurringExpenses : INITIAL_RECURRING,
-        wishlist,
-        assets,
-        diaryEntries,
-        songs: songs.length > 0 ? songs : INITIAL_SONGS,
-        savingsFunds: savingsFunds.length > 0 ? savingsFunds : INITIAL_SAVINGS_FUNDS,
-        canonicalId,
-      };
-    }
-
-    // 5. True first-time user (Brand new account, zero existing subcollections)
-    const initialProfile: UserProfile = {
+    // 3. User profile resolution
+    const userData = foundProfileData || {};
+    const userProfile: UserProfile = {
       uid: canonicalId,
-      email,
-      name: userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Mới'),
-      avatar: '🥑',
-      memberId: memberCode,
-      joinedDate: new Date().toLocaleDateString('vi-VN'),
-      monthlyWorkHours: 160,
-      currentStreakDays: 1,
-      longestStreakDays: 1,
-      lastActiveDate: new Date().toISOString().split('T')[0],
+      email: userData.email || email,
+      name: userData.displayName || userObj.displayName || currentUser?.displayName || (email ? email.split('@')[0] : 'Thành Viên Siêu Thị'),
+      avatar: userData.avatar || '🥑',
+      memberId: userData.memberId || memberCode,
+      joinedDate: userData.joinedDate || new Date().toLocaleDateString('vi-VN'),
+      monthlyWorkHours: Number(userData.monthlyWorkHours) || 160,
+      currentStreakDays: Number(userData.currentStreakDays) || 1,
+      longestStreakDays: Number(userData.longestStreakDays) || 1,
+      lastActiveDate: userData.lastActiveDate || new Date().toISOString().split('T')[0],
     };
 
-    const initialData: FullUserData = {
-      userProfile: initialProfile,
-      hourlyWage: 50000,
-      rolloverSavings: 0,
-      jars: INITIAL_JARS,
-      wallets: INITIAL_WALLETS,
-      transactions: [],
-      recurringExpenses: INITIAL_RECURRING,
-      wishlist: [],
-      assets: [],
-      diaryEntries: [],
-      songs: INITIAL_SONGS,
-      savingsFunds: INITIAL_SAVINGS_FUNDS,
+    const hourlyWage = Number(userData.hourlyWage) || 50000;
+    const rolloverSavings = Number(userData.rolloverSavings) || 0;
+
+    const resultData: FullUserData = {
+      userProfile,
+      hourlyWage,
+      rolloverSavings,
+      jars: jars.length > 0 ? jars : INITIAL_JARS,
+      wallets: wallets.length > 0 ? wallets : INITIAL_WALLETS,
+      transactions,
+      recurringExpenses: recurringExpenses.length > 0 ? recurringExpenses : INITIAL_RECURRING,
+      wishlist,
+      assets,
+      diaryEntries,
+      songs: songs.length > 0 ? songs : INITIAL_SONGS,
+      savingsFunds: savingsFunds.length > 0 ? savingsFunds : INITIAL_SAVINGS_FUNDS,
       canonicalId,
     };
 
-    // Save initial profile & basic collections only for true first-time user
-    await saveFullUserDataToFirestore(canonicalId, initialData);
-    return initialData;
+    // 4. Ensure canonical root user doc exists so future queries are instant
+    await setDoc(doc(db, 'users', canonicalId), {
+      uid: canonicalId,
+      email,
+      displayName: userProfile.name,
+      avatar: userProfile.avatar,
+      memberId: userProfile.memberId,
+      joinedDate: userProfile.joinedDate,
+      monthlyWorkHours: userProfile.monthlyWorkHours,
+      currentStreakDays: userProfile.currentStreakDays,
+      longestStreakDays: userProfile.longestStreakDays,
+      lastActiveDate: userProfile.lastActiveDate,
+      hourlyWage,
+      rolloverSavings,
+      updatedAt: Date.now(),
+    }, { merge: true }).catch(() => {});
+
+    console.log(`[firebaseSync] Loaded unified user data for ${canonicalId}:`, {
+      transactionsCount: transactions.length,
+      jarsCount: jars.length,
+      walletsCount: wallets.length,
+      recurringCount: recurringExpenses.length,
+      diaryCount: diaryEntries.length,
+      savingsFundsCount: savingsFunds.length,
+    });
+
+    return resultData;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, userDocPath);
   }
@@ -349,28 +302,28 @@ export async function saveFullUserDataToFirestore(
 
     // Jars
     data.jars.forEach((jar) => {
-      batch.set(doc(db, 'users', userId, 'jars', jar.id), jar);
+      batch.set(doc(db, 'users', userId, 'jars', jar.id), cleanForFirestore(jar));
     });
 
     // Wallets
     data.wallets.forEach((wallet) => {
-      batch.set(doc(db, 'users', userId, 'wallets', wallet.id), wallet);
+      batch.set(doc(db, 'users', userId, 'wallets', wallet.id), cleanForFirestore(wallet));
     });
 
     // Recurring
     data.recurringExpenses.forEach((rec) => {
-      batch.set(doc(db, 'users', userId, 'recurring', rec.id), rec);
+      batch.set(doc(db, 'users', userId, 'recurring', rec.id), cleanForFirestore(rec));
     });
 
     // Favorite Songs
     data.songs.forEach((song) => {
-      batch.set(doc(db, 'users', userId, 'songs', song.id), song);
+      batch.set(doc(db, 'users', userId, 'songs', song.id), cleanForFirestore(song));
     });
 
     // Savings Funds
     if (data.savingsFunds) {
       data.savingsFunds.forEach((fund) => {
-        batch.set(doc(db, 'users', userId, 'savings_funds', fund.id), fund);
+        batch.set(doc(db, 'users', userId, 'savings_funds', fund.id), cleanForFirestore(fund));
       });
     }
 
@@ -381,7 +334,28 @@ export async function saveFullUserDataToFirestore(
 }
 
 /**
+ * Strips all undefined fields recursively to prevent Firestore 'Unsupported field value: undefined' errors
+ */
+export function cleanForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) return data;
+  if (Array.isArray(data)) {
+    return data.map((item) => cleanForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === 'object') {
+    const clean: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(data as Record<string, unknown>)) {
+      if (val !== undefined) {
+        clean[key] = cleanForFirestore(val);
+      }
+    }
+    return clean as unknown as T;
+  }
+  return data;
+}
+
+/**
  * Helper to save a single subcollection document (e.g. transaction, jar, wallet).
+ * Sanitizes data so undefined values never crash the write.
  */
 export async function saveSubDocument<T extends { id: string }>(
   userId: string,
@@ -390,9 +364,12 @@ export async function saveSubDocument<T extends { id: string }>(
 ): Promise<void> {
   const path = `users/${userId}/${subcollection}/${item.id}`;
   try {
-    await setDoc(doc(db, 'users', userId, subcollection, item.id), item);
+    const cleaned = cleanForFirestore(item);
+    await setDoc(doc(db, 'users', userId, subcollection, item.id), cleaned);
+    // Touch parent user document with merge to ensure it exists
+    await setDoc(doc(db, 'users', userId), { updatedAt: Date.now() }, { merge: true }).catch(() => {});
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[saveSubDocument warning at ${path}]:`, error);
   }
 }
 

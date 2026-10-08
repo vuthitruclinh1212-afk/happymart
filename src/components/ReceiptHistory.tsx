@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction, Jar, Wallet, MoodId } from '../types';
-import { MOODS, getLocalDateString } from '../utils/storage';
-import { Trash2, Edit2, Search, Filter, Printer, Calendar, X, Check, Sparkles, AlertCircle } from 'lucide-react';
+import { MOODS, getLocalDateString, normalizeDateString } from '../utils/storage';
+import { Trash2, Edit2, Search, Filter, Printer, Calendar, X, Check, Sparkles, AlertCircle, RotateCcw } from 'lucide-react';
 import { playSoftPop, playCashRegister } from '../utils/audio';
 
 interface ReceiptHistoryProps {
@@ -43,6 +43,11 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
   const [editDate, setEditDate] = useState<string>('');
 
   const todayStr = useMemo(() => getLocalDateString(), []);
+  const yesterdayStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return getLocalDateString(d);
+  }, []);
   const currentMonthStr = useMemo(() => todayStr.slice(0, 7), [todayStr]);
   const sevenDaysAgoStr = useMemo(() => {
     const d = new Date();
@@ -63,20 +68,23 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
       // Mood filter
       if (selectedMoodFilter !== 'all' && t.mood !== selectedMoodFilter) return false;
 
-      // Date preset filter
-      if (dateFilterPreset === 'today' && t.date !== todayStr) return false;
-      if (dateFilterPreset === '7days' && (t.date < sevenDaysAgoStr || t.date > todayStr)) return false;
-      if (dateFilterPreset === 'thisMonth' && !t.date.startsWith(currentMonthStr)) return false;
+      // Date preset filter (use normalized date comparison)
+      const txDate = normalizeDateString(t.date);
+      if (dateFilterPreset === 'today' && txDate !== todayStr) return false;
+      if (dateFilterPreset === '7days' && txDate < sevenDaysAgoStr) return false;
+      if (dateFilterPreset === 'thisMonth' && !txDate.startsWith(currentMonthStr)) return false;
       if (dateFilterPreset === 'custom') {
-        if (customStartDate && t.date < customStartDate) return false;
-        if (customEndDate && t.date > customEndDate) return false;
+        const start = normalizeDateString(customStartDate);
+        const end = normalizeDateString(customEndDate);
+        if (start && txDate < start) return false;
+        if (end && txDate > end) return false;
       }
 
       // Search keyword
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchSub = t.subCategory.toLowerCase().includes(q);
-        const matchNote = t.note?.toLowerCase().includes(q);
+        const matchSub = (t.subCategory || '').toLowerCase().includes(q);
+        const matchNote = (t.note || '').toLowerCase().includes(q);
         return matchSub || matchNote;
       }
 
@@ -532,6 +540,31 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
 
           {/* Table Items */}
           <div className="p-4 sm:p-6">
+            {filtered.length < transactions.length && (
+              <div className="mb-4 p-2.5 bg-pink-50 border border-pink-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-pink-950 font-medium">
+                <span>
+                  💡 Đang áp dụng bộ lọc: hiển thị <strong>{filtered.length}</strong> / <strong>{transactions.length}</strong> giao dịch (có các giao dịch hôm qua hoặc ngày khác bị ẩn).
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playSoftPop();
+                    setDateFilterPreset('all');
+                    setSelectedTypeFilter('all');
+                    setSelectedJarFilter('all');
+                    setSelectedMoodFilter('all');
+                    setSearchQuery('');
+                    setCustomStartDate('');
+                    setCustomEndDate('');
+                  }}
+                  className="px-2.5 py-1 bg-white hover:bg-pink-100 text-pink-700 font-bold border border-pink-300 rounded-xl flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Hiện toàn bộ ({transactions.length})</span>
+                </button>
+              </div>
+            )}
+
             {filtered.length === 0 ? (
               <div className="text-center py-12 text-gray-400 font-medium">
                 <span className="text-3xl block mb-2">🛍️</span>
@@ -555,6 +588,10 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                   const moodObj = MOODS.find((m) => m.id === t.mood);
                   const wallet = wallets.find((w) => w.id === t.walletId);
                   const targetWallet = wallets.find((w) => w.id === t.targetWalletId);
+                  const normDate = normalizeDateString(t.date);
+                  const isToday = normDate === todayStr;
+                  const isYesterday = normDate === yesterdayStr;
+                  const dateLabel = isToday ? 'Hôm nay' : isYesterday ? 'Hôm qua' : t.date;
 
                   return (
                     <div
@@ -581,6 +618,17 @@ export const ReceiptHistory: React.FC<ReceiptHistoryProps> = ({
                             {isTransfer ? '🔄 CHUYỂN VÍ' : isIncome ? '💰 THU' : '🛒 CHI'}
                           </span>
                           <span className="truncate">{t.subCategory}</span>
+                          <span
+                            className={`px-1.5 py-0.2 rounded-md font-bold text-[9px] shrink-0 ${
+                              isToday
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : isYesterday
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200 font-extrabold'
+                                : 'text-gray-400'
+                            }`}
+                          >
+                            {dateLabel}
+                          </span>
                         </div>
                         <div className="text-[10px] text-gray-500 truncate mt-0.5">
                           {isTransfer ? (
